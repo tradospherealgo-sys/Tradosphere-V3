@@ -1,1 +1,1 @@
-web: gunicorn --bind 0.0.0.0:$PORT --workers 3 --timeout 60 backend.tradosphere_saas_server_v3_1:app
+web: python backend/tradosphere_saas_server_v3_1.py
