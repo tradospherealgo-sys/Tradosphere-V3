@@ -1,23 +1,5 @@
 {
   "version": 2,
-  "buildCommand": "echo 'Static site - no build needed'",
-  "outputDirectory": ".",
-  "public": true,
-  "routes": [
-    {
-      "src": "/login",
-      "destination": "/login_v3.1.html"
-    },
-    {
-      "src": "/dashboard",
-      "destination": "/dashboard_live_v3.1.html"
-    },
-    {
-      "src": "/(.*)",
-      "destination": "/login_v3.1.html"
-    }
-  ],
-  "env": {
-    "REACT_APP_API_URL": "@api_url"
-  }
+  "buildCommand": "echo 'Static site'",
+  "outputDirectory": "."
 }
