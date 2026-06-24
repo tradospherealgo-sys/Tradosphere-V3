@@ -1,26 +1,44 @@
 {
   "version": 2,
   "name": "tradosphere",
+  "buildCommand": "pip install -r config/requirements.txt",
+  "outputDirectory": ".",
+  "framework": "python",
+  "functions": {
+    "backend/tradosphere_saas_server_v3_1.py": {
+      "runtime": "python3.11",
+      "memory": 3008,
+      "maxDuration": 60
+    }
+  },
   "env": {
-    "JWT_SECRET": "@jwt_secret_prod",
-    "DATABASE_URL": "@database_url_prod",
-    "ANGEL_ONE_CLIENT_ID": "@angel_one_client_id",
-    "ANGEL_ONE_PASSWORD": "@angel_one_password",
-    "ANGEL_ONE_TOTP": "@angel_one_totp",
+    "FLASK_ENV": "@flask_env",
+    "PORT": "5000",
+    "DEBUG": "false",
+    "JWT_SECRET": "@jwt_secret",
+    "JWT_EXPIRATION": "3600",
+    "REFRESH_TOKEN_EXPIRATION": "604800",
+    "DATABASE_URL": "@database_url",
     "ANGEL_ONE_API_KEY": "@angel_one_api_key",
+    "ANGEL_ONE_CLIENT_CODE": "@angel_one_client_code",
+    "ANGEL_ONE_PIN": "@angel_one_pin",
+    "ANGEL_ONE_TOTP_SECRET": "@angel_one_totp_secret",
+    "ANTHROPIC_API_KEY": "@anthropic_api_key",
     "GOOGLE_CLIENT_ID": "@google_client_id",
     "GOOGLE_CLIENT_SECRET": "@google_client_secret",
     "STRIPE_PUBLIC_KEY": "@stripe_public_key",
     "STRIPE_SECRET_KEY": "@stripe_secret_key",
-    "SENDGRID_API_KEY": "@sendgrid_api_key"
+    "SENDGRID_API_KEY": "@sendgrid_api_key",
+    "SENDGRID_FROM_EMAIL": "@sendgrid_from_email",
+    "CORS_ORIGINS": "@cors_origins",
+    "APP_NAME": "Tradosphere",
+    "LOG_LEVEL": "INFO"
   },
-  "buildCommand": "pip install -r config/requirements.txt",
-  "outputDirectory": ".",
-  "framework": "flask",
   "routes": [
     {
       "src": "/.*",
       "dest": "backend/tradosphere_saas_server_v3_1.py"
     }
-  ]
+  ],
+  "buildVersion": "5"
 }

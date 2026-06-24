@@ -28,7 +28,7 @@ Advanced multi-tenant SaaS trading platform with Angel One broker integration, A
 
 ### Local Development
 ```bash
-# 1. Install dependencies
+# 1. Install dependencies (includes: Flask, SQLAlchemy, scipy, anthropic, etc.)
 pip install -r config/requirements.txt
 
 # 2. Set up environment
@@ -47,13 +47,31 @@ python3 tradosphere_saas_server_v3_1.py
 # Demo: demo@tradosphere.com / DemoPass@2024
 ```
 
-### Production Deployment (Railway)
+### Production Deployment
+
+#### ✅ Recommended: Railway.app
+
+Railway is purpose-built for Python/Flask apps with full database support.
+
 ```bash
-1. Push code to GitHub
-2. Connect Railway to repository
-3. Set environment variables in Railway dashboard
-4. Deploy
+1. Push code to GitHub ✅ (Already done)
+2. Go to https://railway.app/dashboard
+3. Create new project → Deploy from GitHub
+4. Select: tradospherealgo-sys/Tradosphere-V3
+5. Add PostgreSQL database
+6. Set environment variables (see RAILWAY_DEPLOYMENT.md)
+7. Deploy (auto-triggers on GitHub push)
 ```
+
+**Full Guide**: See [RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md)
+
+#### ⚠️ Not Recommended: Vercel
+
+Vercel (serverless) doesn't work well with:
+- Flask apps (not natively supported)
+- Persistent databases
+- Long-running processes
+- WebSocket connections (future phases)
 
 ## 📁 Project Structure
 
