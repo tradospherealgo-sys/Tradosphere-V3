@@ -9,7 +9,7 @@ if (window.location.hostname === 'localhost' || window.location.hostname === '12
 }
 // Production environment
 else if (window.location.hostname.includes('vercel.app') || window.location.hostname.includes('tradosphere.in')) {
-    window.API_BASE_URL = 'https://api.tradosphere.in';
+    window.API_BASE_URL = 'https://web-production-7bb17.up.railway.app';
 }
 // Railway deployment
 else if (window.location.hostname.includes('railway.app')) {
