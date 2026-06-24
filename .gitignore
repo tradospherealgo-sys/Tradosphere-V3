@@ -1,0 +1,55 @@
+# Virtual Environment
+venv/
+env/
+*.egg-info/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Archives
+_ARCHIVE/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node (if using npm)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Temporary
+tmp/
+temp/
+*.tmp

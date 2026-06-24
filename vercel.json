@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "name": "tradosphere",
+  "env": {
+    "JWT_SECRET": "@jwt_secret_prod",
+    "DATABASE_URL": "@database_url_prod",
+    "ANGEL_ONE_CLIENT_ID": "@angel_one_client_id",
+    "ANGEL_ONE_PASSWORD": "@angel_one_password",
+    "ANGEL_ONE_TOTP": "@angel_one_totp",
+    "ANGEL_ONE_API_KEY": "@angel_one_api_key",
+    "GOOGLE_CLIENT_ID": "@google_client_id",
+    "GOOGLE_CLIENT_SECRET": "@google_client_secret",
+    "STRIPE_PUBLIC_KEY": "@stripe_public_key",
+    "STRIPE_SECRET_KEY": "@stripe_secret_key",
+    "SENDGRID_API_KEY": "@sendgrid_api_key"
+  },
+  "buildCommand": "pip install -r config/requirements.txt",
+  "outputDirectory": ".",
+  "framework": "flask",
+  "routes": [
+    {
+      "src": "/.*",
+      "dest": "backend/tradosphere_saas_server_v3_1.py"
+    }
+  ]
+}
