@@ -5,8 +5,11 @@ Provides intelligent market analysis, signal validation, and trading recommendat
 
 import os
 import json
+import logging
 from datetime import datetime
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class ClaudeAIService:
@@ -20,7 +23,14 @@ class ClaudeAIService:
                            technical_data: Dict, options_data: Dict = None) -> Dict:
         """Analyze market data using Claude AI"""
         if not ClaudeAIService.API_KEY:
-            return ClaudeAIService._get_fallback_analysis(symbol, price, change_percent)
+            logger.warning(f"Claude AI API key not configured, returning service unavailable")
+            return {
+                "status": "error",
+                "error": "AI analysis service is temporarily unavailable",
+                "code": "AI_SERVICE_UNAVAILABLE",
+                "symbol": symbol,
+                "timestamp": datetime.utcnow().isoformat()
+            }
 
         try:
             import anthropic
@@ -76,14 +86,26 @@ class ClaudeAIService:
             }
 
         except Exception as e:
-            print(f"Claude API error: {e}")
-            return ClaudeAIService._get_fallback_analysis(symbol, price, change_percent)
+            logger.error(f"Claude API error: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "error": "AI analysis service is temporarily unavailable",
+                "code": "AI_SERVICE_ERROR",
+                "symbol": symbol,
+                "timestamp": datetime.utcnow().isoformat()
+            }
 
     @staticmethod
     def validate_signal(signal_data: Dict) -> Dict:
         """Validate a trading signal using Claude AI"""
         if not ClaudeAIService.API_KEY:
-            return ClaudeAIService._get_fallback_validation(signal_data)
+            logger.warning("Claude AI API key not configured, returning service unavailable")
+            return {
+                "status": "error",
+                "error": "AI validation service is temporarily unavailable",
+                "code": "AI_SERVICE_UNAVAILABLE",
+                "timestamp": datetime.utcnow().isoformat()
+            }
 
         try:
             import anthropic
@@ -127,45 +149,13 @@ class ClaudeAIService:
             }
 
         except Exception as e:
-            return ClaudeAIService._get_fallback_validation(signal_data)
-
-    @staticmethod
-    def _get_fallback_analysis(symbol: str, price: float, change_percent: float) -> Dict:
-        """Fallback analysis when Claude API is unavailable"""
-        sentiment = "bullish" if change_percent > 0 else "bearish" if change_percent < -1 else "neutral"
-
-        return {
-            "status": "success",
-            "symbol": symbol,
-            "analysis": {
-                "sentiment": sentiment,
-                "recommendation": "BUY" if sentiment == "bullish" else "SELL" if sentiment == "bearish" else "HOLD",
-                "confidence": abs(change_percent),
-                "support": round(price * 0.98, 2),
-                "resistance": round(price * 1.02, 2),
-                "entry": round(price, 2),
-                "target": round(price * 1.02, 2) if sentiment == "bullish" else round(price * 0.98, 2),
-                "stoploss": round(price * 0.95, 2) if sentiment == "bullish" else round(price * 1.05, 2),
-                "risk_reward_ratio": 2.0,
-                "note": "Generated using fallback model (Claude API unavailable)"
-            },
-            "timestamp": datetime.utcnow().isoformat(),
-            "source": "Fallback Model"
-        }
-
-    @staticmethod
-    def _get_fallback_validation(signal_data: Dict) -> Dict:
-        """Fallback validation when Claude API is unavailable"""
-        return {
-            "status": "success",
-            "validation": {
-                "confidence": 60,
-                "risk_assessment": "MEDIUM",
-                "recommended_position_size": "1-2% of portfolio",
-                "note": "Generated using fallback model (Claude API unavailable)"
-            },
-            "timestamp": datetime.utcnow().isoformat()
-        }
+            logger.error(f"Claude validation error: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "error": "AI validation service is temporarily unavailable",
+                "code": "AI_SERVICE_ERROR",
+                "timestamp": datetime.utcnow().isoformat()
+            }
 
 
 if __name__ == "__main__":
