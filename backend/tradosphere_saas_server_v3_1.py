@@ -115,8 +115,8 @@ except ImportError:
 app = Flask(__name__)
 
 # CORS Configuration - Allow frontend to access backend
-CORS(app, resources={
-    r"/api/*": {
+CORS(app,
+    resources={r"/api/*": {
         "origins": [
             "http://localhost:3000",
             "http://localhost:5000",
@@ -126,9 +126,11 @@ CORS(app, resources={
             "https://www.tradosphere.in"
         ],
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"]
-    }
-})
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True,
+        "max_age": 3600
+    }}
+)
 
 # Configuration
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'tradosphere-secret-key')
