@@ -1823,4 +1823,6 @@ if __name__ == '__main__':
     logger.info(f"   Dashboard: http://localhost:{port}/dashboard (requires auth)")
     logger.info(separator + "\n")
 
+if __name__ == '__main__':
+    port = int(os.getenv('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
