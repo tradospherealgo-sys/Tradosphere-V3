@@ -159,6 +159,40 @@ register_error_handlers(app)
 register_logging_middleware(app)
 logger.info("✅ Error handlers and logging middleware registered")
 
+# ===== MONITORING & METRICS (Tier 2 #10) =====
+# Wire the performance monitor: record count/latency/status for every request.
+from monitoring import performance_monitor
+
+# App start time for uptime reporting.
+APP_START_TIME = datetime.utcnow()
+
+
+@app.before_request
+def _metrics_before_request():
+    """Stamp the request start time for latency measurement."""
+    g._metrics_start = datetime.utcnow()
+
+
+@app.after_request
+def _metrics_after_request(response):
+    """Record this request into the performance monitor."""
+    try:
+        start = getattr(g, "_metrics_start", None)
+        if start is not None:
+            duration_ms = (datetime.utcnow() - start).total_seconds() * 1000
+            # Use the matched URL rule (not the raw path) so metrics don't
+            # explode into a separate bucket per dynamic id.
+            endpoint = request.url_rule.rule if request.url_rule else request.path
+            performance_monitor.record_endpoint_call(
+                endpoint, request.method, round(duration_ms, 2), response.status_code
+            )
+    except Exception as _metrics_err:
+        logger.debug(f"metrics recording skipped: {_metrics_err}")
+    return response
+
+
+logger.info("✅ Monitoring & metrics wired (Tier 2 #10)")
+
 # Initialize databases
 logger.info("🔧 Initializing databases...")
 init_db()
@@ -581,11 +615,99 @@ def health_detailed():
         return jsonify(health_response), http_status
 
     except Exception as e:
+        logger.error(f"health_detailed error: {e}", exc_info=True)
         return jsonify({
             "status": "error",
-            "message": str(e),
+            "message": "Health check failed",
             "timestamp": datetime.utcnow().isoformat()
         }), 500
+
+
+# ===== METRICS & DEEP HEALTH (Tier 2 #10) =====
+@app.route('/metrics', methods=['GET'])
+def metrics():
+    """Live performance metrics: per-endpoint count, latency, error rate."""
+    return jsonify({
+        "status": "success",
+        "metrics": performance_monitor.get_all_metrics(),
+        "uptime_seconds": int((datetime.utcnow() - APP_START_TIME).total_seconds()),
+        "timestamp": datetime.utcnow().isoformat()
+    }), 200
+
+
+@app.route('/health/deep', methods=['GET'])
+def health_deep():
+    """Deep health check: component status + uptime + live metrics summary.
+
+    Lightweight by design — reuses the already-connected global broker and a
+    single DB ping. Returns 200 while the core (DB) is up even if the broker is
+    degraded; only returns 503 if the core service itself is down.
+    """
+    # Broker (reuse the existing global connection — no new auth)
+    broker_status = "disconnected"
+    try:
+        if market is not None and market.is_authenticated():
+            broker_status = "connected"
+        elif market is not None:
+            broker_status = "failed_auth"
+    except Exception:
+        broker_status = "error"
+
+    # Database (single lightweight ping)
+    db_status = "connected"
+    try:
+        from sqlalchemy import text
+        _session = SessionLocal()
+        _session.execute(text("SELECT 1"))
+        _session.close()
+    except Exception as db_err:
+        logger.warning(f"health/deep DB ping failed: {db_err}")
+        db_status = "error"
+
+    # Live metrics summary
+    all_metrics = performance_monitor.get_all_metrics()
+    endpoints = all_metrics.get("endpoints", {})
+    total_requests = sum(e.get("count", 0) for e in endpoints.values())
+    if total_requests > 0:
+        avg_latency = round(
+            sum(e["avg_time_ms"] * e["count"] for e in endpoints.values()) / total_requests, 2
+        )
+        total_errors = sum(
+            (e["error_rate_percent"] / 100.0) * e["count"] for e in endpoints.values()
+        )
+        error_rate = round(total_errors / total_requests * 100, 2)
+    else:
+        avg_latency = 0.0
+        error_rate = 0.0
+
+    core_ok = db_status == "connected"
+    if core_ok and broker_status == "connected":
+        overall = "healthy"
+    elif core_ok:
+        overall = "degraded"
+    else:
+        overall = "unhealthy"
+
+    payload = {
+        "status": overall,
+        "uptime_seconds": int((datetime.utcnow() - APP_START_TIME).total_seconds()),
+        "components": {
+            "broker": broker_status,
+            "database": db_status,
+            "api_server": "operational"
+        },
+        "metrics_summary": {
+            "total_requests": total_requests,
+            "avg_latency_ms": avg_latency,
+            "error_rate_percent": error_rate,
+            "tracked_endpoints": len(endpoints)
+        },
+        "version": "3.1",
+        "environment": os.getenv("FLASK_ENV", "production"),
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    return jsonify(payload), (200 if core_ok else 503)
+
 
 @app.route('/api/status', methods=['GET'])
 def status():
