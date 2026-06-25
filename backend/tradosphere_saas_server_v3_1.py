@@ -26,7 +26,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 from logger_config import setup_logging
 logger = setup_logging()
 
-from flask import Flask, jsonify, request, send_file, g
+from flask import Flask, jsonify, request, send_file, g, make_response
 from flask_cors import CORS
 
 # Import modules
@@ -115,22 +115,39 @@ except ImportError:
 app = Flask(__name__)
 
 # CORS Configuration - Allow frontend to access backend
+# Enable CORS for ALL routes with explicit headers
 CORS(app,
-    resources={r"/api/*": {
-        "origins": [
-            "http://localhost:3000",
-            "http://localhost:5000",
-            "https://tradosphere.vercel.app",
-            "https://*.vercel.app",
-            "https://tradosphere.in",
-            "https://www.tradosphere.in"
-        ],
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": True,
-        "max_age": 3600
-    }}
+    origins=[
+        "http://localhost:3000",
+        "http://localhost:5000",
+        "http://localhost:5001",
+        "https://tradosphere.vercel.app",
+        "https://www.tradosphere.vercel.app",
+        "https://*.vercel.app",
+        "https://tradosphere.in",
+        "https://www.tradosphere.in",
+        "https://tradosphere-v3.onrender.com"
+    ],
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["Content-Type", "Authorization", "Accept"],
+    expose_headers=["Content-Type", "Authorization"],
+    supports_credentials=True,
+    max_age=3600,
+    send_wildcard=False
 )
+
+# Add explicit CORS headers for preflight requests
+@app.before_request
+def handle_preflight():
+    """Handle CORS preflight requests explicitly"""
+    if request.method == "OPTIONS":
+        response = make_response()
+        response.headers.add("Access-Control-Allow-Origin", request.headers.get("Origin", "*"))
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization,Accept")
+        response.headers.add("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS,PATCH")
+        response.headers.add("Access-Control-Allow-Credentials", "true")
+        response.headers.add("Access-Control-Max-Age", "3600")
+        return response, 200
 
 # Configuration
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'tradosphere-secret-key')
