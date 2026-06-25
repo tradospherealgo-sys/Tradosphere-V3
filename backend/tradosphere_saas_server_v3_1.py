@@ -193,6 +193,12 @@ def _metrics_after_request(response):
 
 logger.info("✅ Monitoring & metrics wired (Tier 2 #10)")
 
+# ===== INPUT VALIDATION (Tier 2 #7) =====
+from schemas import (
+    validate_body, GenerateSignalSchema, BatchGenerateSchema, CreateTradeSchema
+)
+logger.info("✅ Input validation schemas loaded (Tier 2 #7)")
+
 # Initialize databases
 logger.info("🔧 Initializing databases...")
 init_db()
@@ -1086,6 +1092,7 @@ def get_signals():
 
 @app.route('/api/signals/generate', methods=['POST'])
 @AuthDecorator.token_required
+@validate_body(GenerateSignalSchema)
 def generate_signals():
     """
     Generate intelligent trade signals using System B (SignalGenerator)
@@ -1133,6 +1140,7 @@ def generate_signals():
 
 @app.route('/api/signals/batch-generate', methods=['POST'])
 @AuthDecorator.token_required
+@validate_body(BatchGenerateSchema)
 def batch_generate_signals():
     """
     Generate signals for multiple symbols in one call
@@ -1442,6 +1450,7 @@ def reconcile_signals():
 # ===== PAPER TRADING (NEW) =====
 @app.route('/api/trading/create-trade', methods=['POST'])
 @AuthDecorator.token_required
+@validate_body(CreateTradeSchema)
 def create_paper_trade():
     """Create a new paper trade (requires approval)"""
     try:

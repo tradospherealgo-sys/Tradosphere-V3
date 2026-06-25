@@ -101,6 +101,80 @@ except Exception as e:
 
 
 # ───────────────────────────────────────────────────────────────────
+print("\n=== TIER 2 #7: INPUT VALIDATION ===")
+
+# 1. Schema-level behavior
+try:
+    from marshmallow import ValidationError
+    from schemas import (
+        LoginSchema, SignupSchema, CreateTradeSchema,
+        GenerateSignalSchema, BatchGenerateSchema, validate_body,
+    )
+
+    # valid passes, returns cleaned dict
+    check("valid login loads", LoginSchema().load({"email": "a@b.com", "password": "x"})["email"] == "a@b.com")
+
+    def expect_fail(schema, payload, field):
+        try:
+            schema().load(payload)
+            return False
+        except ValidationError as e:
+            return field in e.messages
+
+    check("login rejects bad email", expect_fail(LoginSchema, {"email": "nope", "password": "x"}, "email"))
+    check("login rejects missing password", expect_fail(LoginSchema, {"email": "a@b.com"}, "password"))
+    check("signup rejects short password", expect_fail(SignupSchema, {"email": "a@b.com", "password": "123"}, "password"))
+    check("trade rejects invalid direction",
+          expect_fail(CreateTradeSchema, {"direction": "HOLD", "entry_price": 1, "target_price": 2, "stop_loss": 1}, "direction"))
+    check("trade rejects entry_price <= 0",
+          expect_fail(CreateTradeSchema, {"direction": "BUY_CALL", "entry_price": 0, "target_price": 2, "stop_loss": 1}, "entry_price"))
+    check("trade accepts option direction BUY_CALL",
+          CreateTradeSchema().load({"direction": "BUY_CALL", "entry_price": 100, "target_price": 120, "stop_loss": 90})["direction"] == "BUY_CALL")
+    check("generate-signal defaults symbol to NIFTY", GenerateSignalSchema().load({})["symbol"] == "NIFTY")
+    check("generate-signal rejects unknown symbol",
+          expect_fail(GenerateSignalSchema, {"symbol": "DOGECOIN"}, "symbol"))
+    check("batch defaults to 3 symbols", len(BatchGenerateSchema().load({})["symbols"]) == 3)
+except Exception as e:
+    import traceback; traceback.print_exc()
+    check("schemas import & validate", False, repr(e))
+
+# 2. Live endpoint behavior via test client (decorator gating)
+try:
+    from tradosphere_saas_server_v3_1 import app as _app2
+    _app2.config["TESTING"] = True
+    c2 = _app2.test_client()
+
+    # Login with malformed body -> clean 400 VALIDATION_ERROR (no 500, no crash)
+    r_bad = c2.post("/api/auth/login", json={"email": "not-an-email", "password": ""})
+    bb = r_bad.get_json()
+    check("login bad input -> 400", r_bad.status_code == 400, f"got {r_bad.status_code}: {json.dumps(bb)[:160]}")
+    check("login 400 uses VALIDATION_ERROR code",
+          bb.get("error", {}).get("code") == "VALIDATION_ERROR", json.dumps(bb)[:160])
+    check("login 400 returns per-field errors",
+          "fields" in (bb.get("data") or {}) and "email" in bb["data"]["fields"], json.dumps(bb)[:200])
+
+    # Login with no body at all -> still clean 400 (not a 500)
+    r_empty = c2.post("/api/auth/login")
+    check("login empty body -> clean 400 (not 500)", r_empty.status_code == 400, f"got {r_empty.status_code}")
+
+    # Signup with short password -> 400 password field error
+    r_su = c2.post("/api/auth/signup", json={"email": "new@user.com", "password": "12"})
+    bsu = r_su.get_json()
+    check("signup short pw -> 400 with password field",
+          r_su.status_code == 400 and "password" in (bsu.get("data", {}).get("fields", {})),
+          json.dumps(bsu)[:200])
+
+    # Valid-shaped login (wrong creds) must PASS validation and reach handler
+    # -> handler returns 401 (invalid credentials), NOT 400 (validation)
+    r_valid_shape = c2.post("/api/auth/login", json={"email": "ghost@nowhere.com", "password": "whatever"})
+    check("valid-shaped login passes validation, reaches handler (not 400)",
+          r_valid_shape.status_code != 400, f"got {r_valid_shape.status_code}")
+except Exception as e:
+    import traceback; traceback.print_exc()
+    check("validation live-endpoint gating", False, repr(e))
+
+
+# ───────────────────────────────────────────────────────────────────
 total = len(results)
 passed = sum(1 for _, ok, _ in results if ok)
 failed = total - passed

@@ -13,6 +13,7 @@ from auth_manager_v3_1 import (
     PasswordManager, JWTManager, EmailValidator, AuthDecorator
 )
 from response_handler import APIResponse
+from schemas import validate_body, LoginSchema, SignupSchema, RefreshSchema, GoogleAuthSchema
 from leads_model import SessionLocal as LeadsSessionLocal, create_lead, convert_lead_to_customer, get_lead_by_email
 
 # Google JWT verification
@@ -28,6 +29,7 @@ auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
 
 @auth_bp.route('/google', methods=['POST'])
+@validate_body(GoogleAuthSchema)
 def google_auth():
     """Google OAuth authentication endpoint"""
     try:
@@ -113,6 +115,7 @@ def google_auth():
 
 
 @auth_bp.route('/signup', methods=['POST'])
+@validate_body(SignupSchema)
 def signup():
     """User signup endpoint"""
     try:
@@ -182,6 +185,7 @@ def signup():
 
 
 @auth_bp.route('/login', methods=['POST'])
+@validate_body(LoginSchema)
 def login():
     """User login endpoint"""
     try:
@@ -263,6 +267,7 @@ def logout():
 
 
 @auth_bp.route('/refresh', methods=['POST'])
+@validate_body(RefreshSchema)
 def refresh_token():
     """Refresh access token using refresh token"""
     try:
