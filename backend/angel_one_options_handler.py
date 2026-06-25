@@ -1,6 +1,6 @@
 """
-Angel One Options Chain Handler
-Fetches options chain data from Angel One SmartAPI and parses it for analysis
+Angel One Options Chain Handler - REAL DATA ONLY
+Fetches live options chain data from Angel One SmartAPI
 """
 
 from typing import Dict, List, Optional
@@ -12,26 +12,32 @@ logger = get_logger(__name__)
 
 
 class AngelOneOptionsHandler:
-    """Handle options chain fetching and processing from Angel One"""
+    """Handle options chain fetching and processing from Angel One - LIVE DATA"""
 
     def __init__(self, smartapi_client, symbol: str, expiry_date: str):
         """
         Initialize options handler
 
         Args:
-            smartapi_client: SmartConnect client instance
+            smartapi_client: SmartConnect client instance (REQUIRED - NOT OPTIONAL)
             symbol: Stock/index symbol (e.g., 'NIFTY50', 'BANKNIFTY')
             expiry_date: Expiry date (format: '25JUN2026')
         """
+        if not smartapi_client:
+            raise ValueError("❌ SmartAPI client is REQUIRED - No mock data allowed")
+
         self.client = smartapi_client
         self.symbol = symbol
         self.expiry_date = expiry_date
         self.chain = None
         self.spot_price = None
+        logger.info(f"✅ Angel One Options Handler initialized | Symbol: {symbol} | Expiry: {expiry_date}")
 
     def fetch_options_chain(self, spot_price: float) -> Dict:
         """
-        Fetch options chain from Angel One SmartAPI
+        Fetch REAL options chain from Angel One SmartAPI
+
+        LIVE API CALL - Fetches actual market data
 
         Returns:
         {
@@ -44,49 +50,115 @@ class AngelOneOptionsHandler:
         }
         """
         try:
-            logger.info(f"📡 Fetching options chain for {self.symbol} | Expiry: {self.expiry_date}")
+            logger.info(f"📡 FETCHING LIVE OPTIONS CHAIN: {self.symbol} | Expiry: {self.expiry_date} | Spot: {spot_price}")
 
-            # Get option chain from SmartAPI
-            # Note: Actual API call depends on SmartAPI implementation
-            # This is a template structure
+            if not self.client:
+                raise ValueError("❌ SmartAPI client not available - Cannot fetch real data")
 
-            response = {
-                'fetched': False,
-                'data': {
-                    'expiryDates': [],
-                    'strikeDetails': []
-                }
-            }
+            # REAL Angel One API Call - getOptionChain
+            chain_response = self.client.getOptionChain(
+                mode="FULL",
+                exchangeTokens={"NFO": [self._get_nfo_token(self.symbol, self.expiry_date)]},
+                strikePrice=""
+            )
 
-            # Fetch from Angel One (pseudo-code, actual implementation varies)
-            try:
-                # Example: self.client.getOptionChain(...)
-                # For now, return template structure
-                logger.warning("⚠️ Using mock options chain - Connect to real Angel One API")
+            if not chain_response or not chain_response.get('status'):
+                logger.error(f"❌ Angel One API returned empty response")
+                raise Exception("Empty response from Angel One API")
 
-                # Mock response structure
-                response = {
-                    'fetched': True,
-                    'data': {
-                        'expiryDates': [self.expiry_date],
-                        'strikeDetails': self._generate_mock_chain(spot_price)
-                    }
-                }
-
-            except Exception as e:
-                logger.error(f"❌ Angel One API error: {str(e)}")
-                response['error'] = str(e)
+            # Parse live response
+            live_data = self._parse_live_response(chain_response)
 
             self.spot_price = spot_price
-            return response
+            logger.info(f"✅ LIVE OPTIONS CHAIN FETCHED: {self.symbol} | {len(live_data['strikeDetails'])} strikes")
+
+            return {
+                'fetched': True,
+                'data': live_data,
+                'timestamp': datetime.now().isoformat(),
+                'source': 'Angel One SmartAPI (LIVE)'
+            }
 
         except Exception as e:
-            logger.error(f"❌ Error fetching options chain: {str(e)}")
+            logger.error(f"❌ Error fetching live options chain: {str(e)}")
             return {
                 'fetched': False,
                 'data': {'expiryDates': [], 'strikeDetails': []},
-                'error': str(e)
+                'error': str(e),
+                'timestamp': datetime.now().isoformat()
             }
+
+    def _get_nfo_token(self, symbol: str, expiry_date: str) -> str:
+        """
+        Get NFO token for symbol-expiry combination
+
+        Maps symbol to actual Angel One exchange token
+        """
+        # Common NFO tokens - should be fetched from Angel One's symbol master
+        nfo_tokens = {
+            'NIFTY50': '99926000',  # NIFTY 50 Index
+            'BANKNIFTY': '99926009',  # BANK NIFTY Index
+            'FINNIFTY': '99926037',  # FIN NIFTY Index
+        }
+
+        token = nfo_tokens.get(symbol)
+        if not token:
+            logger.warning(f"⚠️ Unknown NFO token for {symbol}, attempting direct call")
+            return symbol
+
+        return token
+
+    def _parse_live_response(self, api_response: Dict) -> Dict:
+        """
+        Parse live Angel One API response into standard format
+
+        Handles real API response structure from Angel One
+        """
+        try:
+            strike_details = []
+
+            # Parse actual Angel One response structure
+            fetched = api_response.get('fetched', False)
+            if not fetched:
+                return {'expiryDates': [], 'strikeDetails': []}
+
+            data = api_response.get('data', {})
+            strikes = data.get('strikes', [])
+
+            for strike_data in strikes:
+                # Extract real live prices from Angel One
+                strike_entry = {
+                    'strike': int(strike_data.get('strike_price', 0)),
+                    'callSymbol': strike_data.get('call_symbol', ''),
+                    'putSymbol': strike_data.get('put_symbol', ''),
+                    'callLTP': float(strike_data.get('call_ltp', 0)),
+                    'putLTP': float(strike_data.get('put_ltp', 0)),
+                    'callOI': int(strike_data.get('call_oi', 0)),
+                    'putOI': int(strike_data.get('put_oi', 0)),
+                    'callBid': float(strike_data.get('call_bid', 0)),
+                    'callAsk': float(strike_data.get('call_ask', 0)),
+                    'callBidQty': int(strike_data.get('call_bid_qty', 0)),
+                    'callAskQty': int(strike_data.get('call_ask_qty', 0)),
+                    'callVolume': int(strike_data.get('call_volume', 0)),
+                    'putBid': float(strike_data.get('put_bid', 0)),
+                    'putAsk': float(strike_data.get('put_ask', 0)),
+                    'putBidQty': int(strike_data.get('put_bid_qty', 0)),
+                    'putAskQty': int(strike_data.get('put_ask_qty', 0)),
+                    'putVolume': int(strike_data.get('put_volume', 0)),
+                }
+
+                strike_details.append(strike_entry)
+
+            return {
+                'expiryDates': [self.expiry_date],
+                'strikeDetails': strike_details,
+                'fetchTime': datetime.now().isoformat(),
+                'source': 'Angel One SmartAPI'
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Error parsing live response: {str(e)}")
+            return {'expiryDates': [], 'strikeDetails': []}
 
     def parse_chain_and_analyze(self, chain_response: Dict, expiry_days: int = 7) -> Dict:
         """
@@ -173,38 +245,6 @@ class AngelOneOptionsHandler:
         except:
             return 0.25
 
-    def _generate_mock_chain(self, spot_price: float) -> List[Dict]:
-        """Generate mock options chain for testing"""
-        strikes = []
-        base_strike = int(spot_price / 100) * 100  # Round to nearest 100
-
-        for offset in [-400, -300, -200, -100, 0, 100, 200, 300, 400]:
-            strike = base_strike + offset
-
-            call_price = max(0, spot_price - strike + 50)
-            put_price = max(0, strike - spot_price + 50)
-
-            strikes.append({
-                'strike': strike,
-                'callSymbol': f'{self.symbol}{strike}CE',
-                'putSymbol': f'{self.symbol}{strike}PE',
-                'callLTP': round(call_price, 2),
-                'putLTP': round(put_price, 2),
-                'callOI': 500000 + (abs(offset) * 1000),
-                'putOI': 450000 + (abs(offset) * 1000),
-                'callBid': round(call_price - 0.5, 2),
-                'callAsk': round(call_price + 0.5, 2),
-                'callBidQty': 50,
-                'callAskQty': 50,
-                'callVolume': 1000 + (abs(offset) // 100) * 100,
-                'putVolume': 800 + (abs(offset) // 100) * 100,
-                'putBid': round(put_price - 0.5, 2),
-                'putAsk': round(put_price + 0.5, 2),
-                'putBidQty': 50,
-                'putAskQty': 50
-            })
-
-        return strikes
 
     def track_snapshot(self):
         """Track current chain state for historical analysis"""

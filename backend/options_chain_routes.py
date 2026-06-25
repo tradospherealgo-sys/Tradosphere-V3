@@ -29,17 +29,18 @@ def require_params(*params):
 
 
 @options_routes.route('/chain', methods=['POST'])
-@require_params('symbol', 'spot_price', 'expiry_date')
+@require_params('symbol', 'spot_price', 'expiry_date', 'smartapi_client')
 def get_options_chain():
     """
-    Fetch and analyze complete options chain
+    Fetch and analyze LIVE options chain from Angel One
 
     Request:
     {
         "symbol": "NIFTY50",
         "spot_price": 23450.25,
         "expiry_date": "25JUN2026",
-        "expiry_days": 7
+        "expiry_days": 7,
+        "smartapi_client": <SmartConnect instance>
     }
 
     Response:
@@ -47,6 +48,7 @@ def get_options_chain():
         "symbol": "NIFTY50",
         "spot_price": 23450.25,
         "timestamp": "2026-06-25T10:30:00",
+        "source": "Angel One SmartAPI (LIVE)",
         "chain_summary": {...},
         "oi_analysis": {...},
         "expected_move": {...},
@@ -59,15 +61,23 @@ def get_options_chain():
         spot_price = float(data['spot_price'])
         expiry_date = data['expiry_date']
         expiry_days = data.get('expiry_days', 7)
+        smartapi_client = data.get('smartapi_client')
 
-        # Create handler
-        handler = AngelOneOptionsHandler(None, symbol, expiry_date)
+        if not smartapi_client:
+            return jsonify({'error': '❌ SmartAPI client required - LIVE data only, no mocks'}), 400
 
-        # Fetch chain (mock for now, will integrate with real Angel One)
+        # Create handler with REAL client
+        handler = AngelOneOptionsHandler(smartapi_client, symbol, expiry_date)
+
+        # Fetch LIVE chain from Angel One
         chain_response = handler.fetch_options_chain(spot_price)
 
         if not chain_response.get('fetched'):
-            return jsonify({'error': 'Failed to fetch options chain'}), 500
+            logger.error(f"❌ Failed to fetch LIVE options chain for {symbol}")
+            return jsonify({
+                'error': 'Failed to fetch live options chain from Angel One',
+                'details': chain_response.get('error', 'Unknown error')
+            }), 500
 
         # Analyze chain
         analysis = handler.parse_chain_and_analyze(chain_response, expiry_days)
@@ -75,10 +85,12 @@ def get_options_chain():
         if 'error' in analysis:
             return jsonify(analysis), 400
 
-        logger.info(f"✅ Options chain returned: {symbol} | {len(analysis.get('chain_summary', {}).get('atm_options', {}).get('options', []))} ATM strikes")
+        num_strikes = len(analysis.get('chain_summary', {}).get('atm_options', {}).get('options', []))
+        logger.info(f"✅ LIVE OPTIONS CHAIN ANALYZED: {symbol} | {num_strikes} strikes | Source: Angel One SmartAPI")
 
         return jsonify({
             'status': 'success',
+            'source': 'Angel One SmartAPI (LIVE)',
             'data': analysis
         }), 200
 
