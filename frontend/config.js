@@ -9,7 +9,7 @@ if (window.location.hostname === 'localhost' || window.location.hostname === '12
 }
 // Production environment (Render backend)
 else if (window.location.hostname.includes('vercel.app') || window.location.hostname.includes('tradosphere.in')) {
-    window.API_BASE_URL = 'https://tradosphere.onrender.com'; // UPDATE THIS WITH YOUR RENDER URL
+    window.API_BASE_URL = 'https://tradosphere-v3.onrender.com';
 }
 // Render deployment
 else if (window.location.hostname.includes('onrender.com') || window.location.hostname.includes('render.com')) {
