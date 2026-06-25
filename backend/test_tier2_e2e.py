@@ -175,6 +175,66 @@ except Exception as e:
 
 
 # ───────────────────────────────────────────────────────────────────
+print("\n=== TIER 2 #8: WEBSOCKET SUPPORT ===")
+try:
+    from tradosphere_saas_server_v3_1 import app as _app3
+    from realtime import socketio, emit_price_update, emit_signal_update, VALID_ROOMS
+
+    _app3.config["TESTING"] = True
+
+    def received_names(client):
+        return [m["name"] for m in client.get_received()]
+
+    # Connect
+    sc = socketio.test_client(_app3)
+    check("socket client connects", sc.is_connected())
+    names = received_names(sc)
+    check("server emits 'connected' on connect", "connected" in names, str(names))
+
+    # Subscribe to prices room
+    sc.emit("subscribe", {"channel": "prices"})
+    sub = received_names(sc)
+    check("subscribe to 'prices' acknowledged", "subscribed" in sub, str(sub))
+
+    # A price tick broadcast reaches a 'prices' subscriber
+    emit_price_update({"NIFTY": 24050.0, "BANKNIFTY": 57500.0})
+    got = sc.get_received()
+    price_evt = [m for m in got if m["name"] == "price_update"]
+    check("subscriber receives 'price_update'", len(price_evt) >= 1, str([m['name'] for m in got]))
+    if price_evt:
+        payload = price_evt[0]["args"][0]
+        check("price_update payload carries prices", payload.get("prices", {}).get("NIFTY") == 24050.0, str(payload))
+
+    # Unknown channel -> error event
+    sc.emit("subscribe", {"channel": "hacker"})
+    err = received_names(sc)
+    check("unknown channel returns 'error'", "error" in err, str(err))
+
+    # Signals room is isolated: a 'prices'-only client must NOT get signal_update
+    emit_signal_update({"symbol": "NIFTY", "direction": "BUY"})
+    after_sig = [m["name"] for m in sc.get_received()]
+    check("prices-only client does NOT receive 'signal_update'",
+          "signal_update" not in after_sig, str(after_sig))
+
+    # A signals subscriber DOES receive it
+    sc2 = socketio.test_client(_app3)
+    sc2.get_received()  # drain 'connected'
+    sc2.emit("subscribe", {"channel": "signals"})
+    sc2.get_received()  # drain 'subscribed'
+    emit_signal_update({"symbol": "BANKNIFTY", "direction": "SELL"})
+    sig_got = [m for m in sc2.get_received() if m["name"] == "signal_update"]
+    check("signals subscriber receives 'signal_update'", len(sig_got) >= 1, "no signal_update")
+
+    check("VALID_ROOMS are exactly prices+signals", VALID_ROOMS == {"prices", "signals"}, str(VALID_ROOMS))
+
+    sc.disconnect()
+    sc2.disconnect()
+except Exception as e:
+    import traceback; traceback.print_exc()
+    check("websocket layer works", False, repr(e))
+
+
+# ───────────────────────────────────────────────────────────────────
 total = len(results)
 passed = sum(1 for _, ok, _ in results if ok)
 failed = total - passed

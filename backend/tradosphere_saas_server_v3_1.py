@@ -199,6 +199,43 @@ from schemas import (
 )
 logger.info("✅ Input validation schemas loaded (Tier 2 #7)")
 
+# ===== REAL-TIME WEBSOCKETS (Tier 2 #8) =====
+from realtime import (
+    init_socketio, socketio, emit_signal_update, start_price_broadcaster
+)
+init_socketio(app)
+
+# Default index prices used when the broker is unavailable (mirrors the REST
+# fallback behavior — kept lightweight so the broadcaster never blocks).
+_WS_FALLBACK_PRICES = {"NIFTY": 24047.50, "BANKNIFTY": 57489.75, "FINNIFTY": 18950.00}
+
+
+def _ws_get_live_prices():
+    """Return current index prices for the broadcaster (live if available)."""
+    try:
+        if market is not None and market.is_authenticated():
+            nifty = market.get_nifty_price() or {}
+            banknifty = market.get_banknifty_price() or {}
+            finnifty = market.get_finnifty_price() or {}
+            prices = {
+                "NIFTY": nifty.get("ltp", _WS_FALLBACK_PRICES["NIFTY"]),
+                "BANKNIFTY": banknifty.get("ltp", _WS_FALLBACK_PRICES["BANKNIFTY"]),
+                "FINNIFTY": finnifty.get("ltp", _WS_FALLBACK_PRICES["FINNIFTY"]),
+            }
+            return prices
+    except Exception as _ws_err:
+        logger.debug(f"WS price fetch fell back: {_ws_err}")
+    return dict(_WS_FALLBACK_PRICES)
+
+
+# The perpetual broadcaster is opt-in (off by default) so importing the app
+# for tests never spawns a background thread. Enable in production via env.
+if os.getenv("ENABLE_WS_BROADCASTER", "false").lower() == "true":
+    start_price_broadcaster(_ws_get_live_prices, interval_seconds=5)
+    logger.info("✅ WS price broadcaster enabled (Tier 2 #8)")
+else:
+    logger.info("✅ Socket.IO ready; broadcaster opt-in (ENABLE_WS_BROADCASTER)")
+
 # Initialize databases
 logger.info("🔧 Initializing databases...")
 init_db()
@@ -1120,6 +1157,11 @@ def generate_signals():
         if result['status'] == 'success':
             result['user_id'] = user_id
             result['api_endpoint'] = 'unified_signal_service'
+            # Real-time push: broadcast the new signal to WS 'signals' subscribers
+            try:
+                emit_signal_update(result.get('signal', result))
+            except Exception as _ws_emit_err:
+                logger.debug(f"WS signal emit skipped: {_ws_emit_err}")
             return jsonify(result), 200
         elif result['status'] == 'no_signal':
             result['user_id'] = user_id

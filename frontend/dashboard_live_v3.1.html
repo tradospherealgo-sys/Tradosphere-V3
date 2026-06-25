@@ -7,6 +7,7 @@
     <!-- Configuration: Backend API URL -->
     <script src="config.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -2113,6 +2114,57 @@
                 console.error('Error:', err);
             }
         }
+    </script>
+
+    <!-- ===== Real-time WebSocket client (Tier 2 #8) ===== -->
+    <script>
+    (function initRealtime() {
+        // Defensive: only run if the Socket.IO client loaded.
+        if (typeof io === 'undefined') {
+            console.warn('⚠️ Socket.IO client not available; real-time disabled');
+            return;
+        }
+        function connect() {
+            const API = window.API_BASE_URL || 'http://localhost:5001';
+            console.log('📡 Connecting realtime WS to', API);
+
+            const socket = io(API, {
+                transports: ['websocket', 'polling'],
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 2000,
+            });
+
+            socket.on('connect', () => {
+                console.log('✅ WS connected:', socket.id);
+                socket.emit('subscribe', { channel: 'prices' });
+                socket.emit('subscribe', { channel: 'signals' });
+            });
+
+            socket.on('connected', (d) => console.log('🤝 WS handshake:', d));
+            socket.on('subscribed', (d) => console.log('📨 Subscribed:', d.channel));
+
+            // Live price ticks -> dispatch a DOM event any widget can listen to.
+            socket.on('price_update', (data) => {
+                window.dispatchEvent(new CustomEvent('ws:price', { detail: data }));
+            });
+
+            // New signal pushes -> dispatch a DOM event for the signals panel.
+            socket.on('signal_update', (data) => {
+                console.log('🔔 New signal pushed:', data.signal);
+                window.dispatchEvent(new CustomEvent('ws:signal', { detail: data }));
+            });
+
+            socket.on('disconnect', (r) => console.log('🔌 WS disconnected:', r));
+            socket.on('connect_error', (e) => console.warn('⚠️ WS connect error:', e.message));
+
+            // Expose for debugging / optional manual use.
+            window.tradosphereSocket = socket;
+        }
+        // Wait for config.js (deferred) to populate API_BASE_URL.
+        if (window.API_BASE_URL) connect();
+        else window.addEventListener('load', connect);
+    })();
     </script>
 </body>
 </html>
