@@ -199,6 +199,10 @@ from schemas import (
 )
 logger.info("✅ Input validation schemas loaded (Tier 2 #7)")
 
+# ===== REDIS CACHING (Tier 2 #9) =====
+from cache import cache, cache_get_or_set
+logger.info(f"✅ Cache layer loaded (Tier 2 #9) — enabled={cache.enabled}")
+
 # ===== REAL-TIME WEBSOCKETS (Tier 2 #8) =====
 from realtime import (
     init_socketio, socketio, emit_signal_update, start_price_broadcaster
@@ -737,6 +741,7 @@ def health_deep():
         "components": {
             "broker": broker_status,
             "database": db_status,
+            "cache": cache.status()["backend"],
             "api_server": "operational"
         },
         "metrics_summary": {
@@ -774,44 +779,50 @@ def status():
 @app.route('/api/market/overview', methods=['GET'])
 @AuthDecorator.token_required
 def market_overview():
-    """Get market overview with major indices"""
+    """Get market overview with major indices (Redis-cached, 5s TTL)."""
     try:
-        symbols_data = []
+        def _build_overview():
+            symbols_data = []
 
-        # Default symbols to display
-        default_symbols = [
-            {'symbol': 'NIFTY', 'exchange': 'NSE', 'token': '99926000'},
-            {'symbol': 'BANKNIFTY', 'exchange': 'NSE', 'token': '99926009'},
-            {'symbol': 'SENSEX', 'exchange': 'BSE', 'token': '1'},
-            {'symbol': 'FINNIFTY', 'exchange': 'NSE', 'token': '99926037'},
-        ]
+            # Default symbols to display
+            default_symbols = [
+                {'symbol': 'NIFTY', 'exchange': 'NSE', 'token': '99926000'},
+                {'symbol': 'BANKNIFTY', 'exchange': 'NSE', 'token': '99926009'},
+                {'symbol': 'SENSEX', 'exchange': 'BSE', 'token': '1'},
+                {'symbol': 'FINNIFTY', 'exchange': 'NSE', 'token': '99926037'},
+            ]
 
-        for sym in default_symbols:
-            try:
-                if market and market.is_authenticated():
-                    price = market.get_ltp(sym['exchange'], sym['symbol'], sym['token'])
-                else:
-                    # Mock data fallback
-                    price = 50000 + (hash(sym['symbol']) % 5000)
+            for sym in default_symbols:
+                try:
+                    if market and market.is_authenticated():
+                        price = market.get_ltp(sym['exchange'], sym['symbol'], sym['token'])
+                    else:
+                        # Mock data fallback
+                        price = 50000 + (hash(sym['symbol']) % 5000)
 
-                change = (hash(sym['symbol']) % 100) * 10 - 500
-                change_percent = (change / price) * 100 if price else 0
+                    change = (hash(sym['symbol']) % 100) * 10 - 500
+                    change_percent = (change / price) * 100 if price else 0
 
-                symbols_data.append({
-                    'name': sym['symbol'],
-                    'price': round(price, 2),
-                    'change': round(change, 2),
-                    'changePercent': round(change_percent, 2),
-                    'volume': hash(sym['symbol']) % 10000000,
-                    'openInterest': hash(sym['symbol']) % 1000000
-                })
-            except Exception as e:
-                logger.info(f"⚠️  {sym['symbol']} fetch error: {e}")
+                    symbols_data.append({
+                        'name': sym['symbol'],
+                        'price': round(price, 2),
+                        'change': round(change, 2),
+                        'changePercent': round(change_percent, 2),
+                        'volume': hash(sym['symbol']) % 10000000,
+                        'openInterest': hash(sym['symbol']) % 1000000
+                    })
+                except Exception as e:
+                    logger.info(f"⚠️  {sym['symbol']} fetch error: {e}")
 
-        return APIResponse.success({
-            "symbols": symbols_data,
-            "timestamp": datetime.utcnow().isoformat()
-        })
+            return {
+                "symbols": symbols_data,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+        # Market overview uses the default symbol set (no per-user variation),
+        # so a single global key is safe. Short TTL keeps prices fresh.
+        data, _hit = cache_get_or_set("market:overview", ttl=5, producer=_build_overview)
+        return APIResponse.success(data)
 
     except Exception as e:
         return APIResponse.server_error(str(e), e)
@@ -1082,46 +1093,53 @@ def get_signals():
         user_id = g.user_id
         symbols = request.args.getlist('symbols', ['NIFTY', 'BANKNIFTY'])
 
-        signals = []
+        def _build_signals():
+            signals = []
+            for symbol in symbols:
+                try:
+                    # Get current price and technical data
+                    if market and market.is_authenticated():
+                        price = market.get_ltp("NSE", symbol, "99926000" if symbol == "NIFTY" else "99926009")
+                    else:
+                        price = 24000  # Fallback
 
-        for symbol in symbols:
-            try:
-                # Get current price and technical data
-                if market and market.is_authenticated():
-                    price = market.get_ltp("NSE", symbol, "99926000" if symbol == "NIFTY" else "99926009")
-                else:
-                    price = 24000  # Fallback
+                    # Get technical indicators
+                    technical_data = {
+                        "ema_20": price * 0.995,
+                        "ema_50": price * 0.99,
+                        "ema_200": price * 0.98,
+                        "rsi": 55,
+                        "macd": 10.5,
+                        "macd_signal": 8.2
+                    }
 
-                # Get technical indicators
-                technical_data = {
-                    "ema_20": price * 0.995,
-                    "ema_50": price * 0.99,
-                    "ema_200": price * 0.98,
-                    "rsi": 55,
-                    "macd": 10.5,
-                    "macd_signal": 8.2
-                }
+                    # Generate real signal
+                    signal = RealSignalGenerator.generate_signal(symbol, price, technical_data, ai_confidence=70)
+                    signals.append(signal)
 
-                # Generate real signal
-                signal = RealSignalGenerator.generate_signal(symbol, price, technical_data, ai_confidence=70)
-                signals.append(signal)
+                except Exception as e:
+                    # Log the real error for ops, but never expose raw internals to users.
+                    logger.warning(f"Error generating signal for {symbol}: {e}")
+                    signals.append({
+                        "symbol": symbol,
+                        "signal": "HOLD",
+                        "reason": "Awaiting sufficient market data",
+                        "timestamp": datetime.utcnow().isoformat()
+                    })
+            return {
+                "signals": signals,
+                "count": len(signals),
+                "timestamp": datetime.utcnow().isoformat()
+            }
 
-            except Exception as e:
-                # Log the real error for ops, but never expose raw internals to users.
-                logger.warning(f"Error generating signal for {symbol}: {e}")
-                signals.append({
-                    "symbol": symbol,
-                    "signal": "HOLD",
-                    "reason": "Awaiting sufficient market data",
-                    "timestamp": datetime.utcnow().isoformat()
-                })
-
-        return APIResponse.success({
-            "signals": signals,
-            "count": len(signals),
-            "user_id": user_id,
-            "timestamp": datetime.utcnow().isoformat()
-        })
+        # Signals are not user-specific (computed from market data), so key on
+        # the requested symbol set. 30s TTL balances freshness vs. broker load.
+        cache_key = "signals:" + ",".join(sorted(symbols))
+        data, _hit = cache_get_or_set(cache_key, ttl=30, producer=_build_signals)
+        # user_id is request-specific, so attach it AFTER cache (never cached).
+        payload = dict(data)
+        payload["user_id"] = user_id
+        return APIResponse.success(payload)
 
     except Exception as e:
         logger.error(f"Error in get_signals: {e}", exc_info=True)

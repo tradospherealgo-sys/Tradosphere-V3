@@ -13,3 +13,8 @@ services:
         value: "1"
       - key: ENABLE_WS_BROADCASTER
         value: "true"
+      # Provision a Render "Key Value" (Redis) instance and paste its
+      # Internal URL here (or set in the dashboard). If unset, the app runs
+      # uncached — caching fails open and never blocks requests.
+      - key: REDIS_URL
+        sync: false
