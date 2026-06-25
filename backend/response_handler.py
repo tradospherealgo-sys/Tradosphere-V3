@@ -3,8 +3,12 @@ Standardized API Response Handler
 Ensures all endpoints return consistent JSON format
 """
 
+import os
 from flask import jsonify
 from datetime import datetime
+
+# Expose raw exception detail to clients only outside production.
+_DEBUG_MODE = os.getenv("FLASK_ENV", "production").lower() in ("development", "dev", "debug")
 
 
 class APIResponse:
@@ -96,15 +100,26 @@ class APIResponse:
 
     @staticmethod
     def server_error(message="Internal server error", exception=None):
-        """Return 500 server error response"""
-        error_data = None
-        if exception:
-            error_data = {"exception": str(exception)}
+        """Return 500 server error response.
+
+        In production we never leak raw exception strings or internal messages
+        to clients — they only see a clean, generic message. Full detail is
+        still available in the server logs. Outside production (development),
+        the exception detail is included to aid debugging.
+        """
+        if _DEBUG_MODE:
+            error_data = {"exception": str(exception)} if exception else None
+            return APIResponse.error(
+                code="SERVER_ERROR",
+                message=message,
+                http_status=500,
+                data=error_data
+            )
+        # Production: generic, user-safe message only.
         return APIResponse.error(
             code="SERVER_ERROR",
-            message=message,
-            http_status=500,
-            data=error_data
+            message="Something went wrong on our end. Please try again shortly.",
+            http_status=500
         )
 
     @staticmethod

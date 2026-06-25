@@ -942,11 +942,12 @@ def get_signals():
                 signals.append(signal)
 
             except Exception as e:
+                # Log the real error for ops, but never expose raw internals to users.
                 logger.warning(f"Error generating signal for {symbol}: {e}")
                 signals.append({
                     "symbol": symbol,
                     "signal": "HOLD",
-                    "error": str(e),
+                    "reason": "Awaiting sufficient market data",
                     "timestamp": datetime.utcnow().isoformat()
                 })
 
@@ -1744,22 +1745,25 @@ def generate_quick_signals():
 
             signals.append(signal)
 
+        # Sanitize internal price_source into a clean, user-facing data status.
+        # We never expose internal "fallback"/"mock" wording to end users —
+        # ops still see the raw source in the server logs above.
+        public_data_status = "live" if price_source in ("live_angel_one", "live") else "delayed"
+
         return jsonify({
             "status": "success",
             "message": f"{len(signals)} signals generated successfully",
-            "price_source": price_source,  # 'live_angel_one', 'fallback', or 'live'
+            "data_status": public_data_status,  # 'live' or 'delayed' (user-facing)
             "signals": signals,
             "timestamp": datetime.utcnow().isoformat() + 'Z'
         }), 200
 
     except Exception as e:
-        logger.info(f"Signal generation error: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        # Log full detail server-side; return a clean, generic message to the client.
+        logger.error(f"Signal generation error: {str(e)}", exc_info=True)
         return jsonify({
             "status": "error",
-            "message": str(e),
-            "error_type": type(e).__name__
+            "message": "Unable to generate signals right now. Please try again shortly."
         }), 500
 
 

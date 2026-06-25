@@ -31,50 +31,50 @@ def register_error_handlers(app):
         """Handle 400 Bad Request"""
         logger.warning(f"Bad request: {str(error)}")
         return APIResponse.error(
-            "Invalid request - check your input data",
             code="BAD_REQUEST",
-            status_code=400
-        ), 400
+            message="Invalid request - check your input data",
+            http_status=400
+        )
 
     @app.errorhandler(401)
     def unauthorized(error):
         """Handle 401 Unauthorized"""
         logger.warning(f"Unauthorized: {str(error)}")
         return APIResponse.error(
-            "Authentication required",
             code="UNAUTHORIZED",
-            status_code=401
-        ), 401
+            message="Authentication required",
+            http_status=401
+        )
 
     @app.errorhandler(403)
     def forbidden(error):
         """Handle 403 Forbidden"""
         logger.warning(f"Forbidden: {str(error)}")
         return APIResponse.error(
-            "Access denied",
             code="FORBIDDEN",
-            status_code=403
-        ), 403
+            message="Access denied",
+            http_status=403
+        )
 
     @app.errorhandler(404)
     def not_found(error):
         """Handle 404 Not Found"""
         logger.info(f"Resource not found: {request.path}")
         return APIResponse.error(
-            "Resource not found",
             code="NOT_FOUND",
-            status_code=404
-        ), 404
+            message="Resource not found",
+            http_status=404
+        )
 
     @app.errorhandler(429)
     def rate_limit(error):
         """Handle 429 Rate Limit"""
         logger.warning(f"Rate limit exceeded for {request.remote_addr}")
         return APIResponse.error(
-            "Too many requests - please try again later",
             code="RATE_LIMIT_EXCEEDED",
-            status_code=429
-        ), 429
+            message="Too many requests - please try again later",
+            http_status=429
+        )
 
     @app.errorhandler(500)
     def internal_error(error):
@@ -84,20 +84,20 @@ def register_error_handlers(app):
             exc_info=True
         )
         return APIResponse.error(
-            "Internal server error",
             code="INTERNAL_ERROR",
-            status_code=500
-        ), 500
+            message="Internal server error",
+            http_status=500
+        )
 
     @app.errorhandler(503)
     def service_unavailable(error):
         """Handle 503 Service Unavailable"""
         logger.warning(f"Service unavailable: {str(error)}")
         return APIResponse.error(
-            "Service temporarily unavailable",
             code="SERVICE_UNAVAILABLE",
-            status_code=503
-        ), 503
+            message="Service temporarily unavailable",
+            http_status=503
+        )
 
     @app.errorhandler(Exception)
     def handle_unexpected(error):
@@ -107,10 +107,10 @@ def register_error_handlers(app):
             exc_info=True
         )
         return APIResponse.error(
-            "An unexpected error occurred",
             code="UNEXPECTED_ERROR",
-            status_code=500
-        ), 500
+            message="An unexpected error occurred",
+            http_status=500
+        )
 
 
 def register_logging_middleware(app):
