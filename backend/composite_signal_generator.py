@@ -16,6 +16,7 @@ class CompositeSignalGenerator:
 
     def __init__(self):
         self.market_regime = MarketRegime()
+        logger.info("✅ Composite Signal Generator initialized with market regime module")
 
     def score_technical_indicators(
         self,

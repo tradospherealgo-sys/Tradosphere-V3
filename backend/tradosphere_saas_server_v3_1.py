@@ -293,6 +293,16 @@ def get_html_file(filename):
         return None
 
 # ===== PUBLIC CONFIG ENDPOINT =====
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint - returns OK if backend is running"""
+    return APIResponse.success({
+        "status": "online",
+        "service": "Tradosphere Backend",
+        "version": "3.1",
+        "timestamp": datetime.now().isoformat()
+    })
+
 @app.route('/api/config', methods=['GET'])
 def get_config():
     """Get public configuration (no auth required)"""
@@ -373,24 +383,23 @@ def login_page():
 
 @app.route('/', methods=['GET'])
 def home():
-    """Redirect to login if not authenticated"""
-    token = request.headers.get('Authorization')
-
-    if token:
-        html_content = get_html_file('saas_dashboard.html')
-        if html_content:
-            return html_content, 200, {'Content-Type': 'text/html; charset=utf-8'}
-
-    html_content = get_html_file('saas_auth_pages.html')
-    if html_content:
-        return html_content, 200, {'Content-Type': 'text/html; charset=utf-8'}
-
-    return jsonify({
-        "status": "error",
-        "message": "saas_auth_pages.html not found"
-    }), 404
+    """Root endpoint - API is running"""
+    return APIResponse.success({
+        "service": "Tradosphere Trading Platform",
+        "status": "online",
+        "version": "3.1",
+        "message": "Backend API is running",
+        "endpoints": {
+            "auth": "/api/auth/login, /api/auth/signup, /api/auth/logout",
+            "user": "/api/user/profile, /api/user/api-keys",
+            "trading": "/api/market/live, /api/analysis/technical",
+            "signals": "/api/signals/generate, /api/signals/history",
+            "options": "/api/options/chain, /api/options/greeks"
+        }
+    })
 
 @app.route('/dashboard', methods=['GET'])
+@app.route('/dashboard_live_v3.1.html', methods=['GET'])
 def dashboard():
     """Serve Angel One-style trading dashboard"""
     html_content = get_html_file('dashboard_live_v3.1.html')

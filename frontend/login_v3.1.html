@@ -171,7 +171,7 @@
 
                     console.log('➡️ Redirecting to dashboard');
                     setTimeout(() => {
-                        window.location.href = '/user/dashboard';
+                        window.location.href = '/dashboard_live_v3.1.html';
                     }, 500);
                 } else {
                     showError(data.error?.message || data.message || 'Login failed');
@@ -209,7 +209,7 @@
                 if (data.status === 'success') {
                     localStorage.setItem('jwt_token', data.access_token);
                     localStorage.setItem('user_role', data.user_role);
-                    window.location.href = data.user_role === 'admin' ? '/admin/dashboard' : '/user/dashboard';
+                    window.location.href = '/dashboard_live_v3.1.html';
                 } else {
                     showError(data.message || 'Google auth failed');
                 }
