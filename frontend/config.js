@@ -7,13 +7,13 @@
 if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
     window.API_BASE_URL = 'http://localhost:5001';
 }
-// Production environment
+// Production environment (Render backend)
 else if (window.location.hostname.includes('vercel.app') || window.location.hostname.includes('tradosphere.in')) {
-    window.API_BASE_URL = 'https://web-production-7bb17.up.railway.app';
+    window.API_BASE_URL = 'https://tradosphere.onrender.com'; // UPDATE THIS WITH YOUR RENDER URL
 }
-// Railway deployment
-else if (window.location.hostname.includes('railway.app')) {
-    window.API_BASE_URL = window.location.origin.replace('http://', 'https://');
+// Render deployment
+else if (window.location.hostname.includes('onrender.com') || window.location.hostname.includes('render.com')) {
+    window.API_BASE_URL = 'https://tradosphere.onrender.com'; // UPDATE THIS WITH YOUR RENDER BACKEND URL
 }
 // Fallback
 else {
