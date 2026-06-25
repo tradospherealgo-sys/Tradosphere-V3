@@ -56,7 +56,7 @@ class TenantDataIsolation:
         from database_v3_1 import Signal
         try:
             return db.query(Signal).filter_by(user_id=user_id).order_by(Signal.created_at.desc()).limit(limit).all()
-        except:
+        except Exception:  # AUDIT FIX #15: don't swallow KeyboardInterrupt/SystemExit
             return []
 
     @staticmethod
@@ -114,20 +114,52 @@ except ImportError:
 # Initialize Flask
 app = Flask(__name__)
 
+# ===== TRUST THE RENDER PROXY (AUDIT FIX #1) =====
+# Render terminates TLS at a load balancer and forwards the real client IP in
+# X-Forwarded-For. Without this, request.remote_addr is the PROXY's IP, which
+# would make the rate limiter (Tier 2 #6) bucket every user together and make
+# request logs useless. ProxyFix rewrites remote_addr/scheme/host from the
+# X-Forwarded-* headers set by exactly ONE trusted proxy hop (Render).
+from werkzeug.middleware.proxy_fix import ProxyFix
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
+
 # CORS Configuration - Allow frontend to access backend
+# Single source of truth for allowed origins (used by both flask-cors AND the
+# explicit preflight handler below, so they can't drift apart).
+_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5000",
+    "http://localhost:5001",
+    "https://tradosphere.vercel.app",
+    "https://www.tradosphere.vercel.app",
+    "https://*.vercel.app",
+    "https://tradosphere.in",
+    "https://www.tradosphere.in",
+    "https://tradosphere-v3.onrender.com",
+]
+
+
+def _is_origin_allowed(origin: str) -> bool:
+    """Match an Origin against the allow-list, supporting a single `*` wildcard
+    label (e.g. https://*.vercel.app matches https://foo.vercel.app)."""
+    if not origin:
+        return False
+    for pattern in _ALLOWED_ORIGINS:
+        if pattern == origin:
+            return True
+        if "*" in pattern:
+            # Turn the pattern into a strict regex: escape everything, then
+            # allow the single `*` to match one or more non-dot/non-slash chars.
+            import re
+            regex = "^" + re.escape(pattern).replace(r"\*", r"[^./]+") + "$"
+            if re.match(regex, origin):
+                return True
+    return False
+
+
 # Enable CORS for ALL routes with explicit headers
 CORS(app,
-    origins=[
-        "http://localhost:3000",
-        "http://localhost:5000",
-        "http://localhost:5001",
-        "https://tradosphere.vercel.app",
-        "https://www.tradosphere.vercel.app",
-        "https://*.vercel.app",
-        "https://tradosphere.in",
-        "https://www.tradosphere.in",
-        "https://tradosphere-v3.onrender.com"
-    ],
+    origins=_ALLOWED_ORIGINS,
     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["Content-Type", "Authorization", "Accept"],
     expose_headers=["Content-Type", "Authorization"],
@@ -139,13 +171,23 @@ CORS(app,
 # Add explicit CORS headers for preflight requests
 @app.before_request
 def handle_preflight():
-    """Handle CORS preflight requests explicitly"""
+    """Handle CORS preflight requests explicitly.
+
+    AUDIT FIX #5: only reflect the Origin back when it is on the allow-list.
+    Previously this reflected ANY origin together with Allow-Credentials:true,
+    which let any website make credentialed cross-origin requests. A
+    disallowed origin now gets NO Access-Control-Allow-Origin header (the
+    browser then blocks the request, which is the correct behavior).
+    """
     if request.method == "OPTIONS":
         response = make_response()
-        response.headers.add("Access-Control-Allow-Origin", request.headers.get("Origin", "*"))
+        origin = request.headers.get("Origin", "")
+        if _is_origin_allowed(origin):
+            response.headers.add("Access-Control-Allow-Origin", origin)
+            response.headers.add("Access-Control-Allow-Credentials", "true")
+        response.headers.add("Vary", "Origin")
         response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization,Accept")
         response.headers.add("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS,PATCH")
-        response.headers.add("Access-Control-Allow-Credentials", "true")
         response.headers.add("Access-Control-Max-Age", "3600")
         return response, 200
 
@@ -182,7 +224,11 @@ def _metrics_after_request(response):
             duration_ms = (datetime.utcnow() - start).total_seconds() * 1000
             # Use the matched URL rule (not the raw path) so metrics don't
             # explode into a separate bucket per dynamic id.
-            endpoint = request.url_rule.rule if request.url_rule else request.path
+            # AUDIT FIX #4: unmatched routes (404s) have NO url_rule. Bucketing
+            # them under the raw path let a path-scanner create unlimited
+            # metric keys (memory-growth / DoS vector). Collapse them all into a
+            # single "<unmatched>" bucket instead.
+            endpoint = request.url_rule.rule if request.url_rule else "<unmatched>"
             performance_monitor.record_endpoint_call(
                 endpoint, request.method, round(duration_ms, 2), response.status_code
             )
@@ -265,11 +311,24 @@ app.register_blueprint(trading_bp)
 app.register_blueprint(backtest_bp)
 
 # ===== APPLY RATE LIMITS (Tier 2 #6) =====
-# Strict ceiling on the auth blueprint (brute-force / credential-stuffing).
-# (Monitoring-probe exemptions are applied at the end of the module, after the
-# health/metrics routes are defined — see "RATE-LIMIT EXEMPTIONS" below.)
-limiter.limit(AUTH_LIMITS)(auth_bp)
-logger.info("✅ Strict rate limits applied to auth blueprint (Tier 2 #6)")
+# AUDIT FIX #11: apply the strict 10/min limit ONLY to credential-verifying
+# endpoints (login/signup/google/forgot-password/reset-password) rather than
+# the entire auth blueprint. The old blanket application also throttled
+# /refresh, /logout and /me, which broke normal flows (e.g. silent token
+# refresh) for active users. The default limits still protect those routes.
+# (Monitoring-probe exemptions are applied at the end of the module.)
+_AUTH_STRICT_ENDPOINTS = (
+    "auth.login", "auth.signup", "auth.google_auth",
+    "auth.forgot_password", "auth.reset_password",
+)
+_applied = []
+for _ep in _AUTH_STRICT_ENDPOINTS:
+    _vf = app.view_functions.get(_ep)
+    if _vf is not None:
+        # Wrap the registered view in-place with the strict limit.
+        app.view_functions[_ep] = limiter.limit(AUTH_LIMITS)(_vf)
+        _applied.append(_ep)
+logger.info(f"✅ Strict rate limits applied to {len(_applied)} auth endpoints (Tier 2 #6): {_applied}")
 
 # Register multi-tenant middleware
 MultiTenantMiddleware.register_tenant_middleware(app) if hasattr(MultiTenantMiddleware, 'register_tenant_middleware') else None
@@ -732,9 +791,9 @@ def health_deep():
         avg_latency = round(
             sum(e["avg_time_ms"] * e["count"] for e in endpoints.values()) / total_requests, 2
         )
-        total_errors = sum(
-            (e["error_rate_percent"] / 100.0) * e["count"] for e in endpoints.values()
-        )
+        # AUDIT FIX #8: sum the EXACT raw error counts now exposed by the
+        # monitor, instead of reconstructing them from rounded percentages.
+        total_errors = sum(e.get("error_count", 0) for e in endpoints.values())
         error_rate = round(total_errors / total_requests * 100, 2)
     else:
         avg_latency = 0.0
@@ -1073,7 +1132,7 @@ def options_analysis():
         try:
             analysis = OptionsEngine.analyze(option_chain)
             trend = "bullish" if pcr < 1.0 else ("bearish" if pcr > 1.2 else "neutral")
-        except:
+        except Exception:  # AUDIT FIX #15: don't swallow KeyboardInterrupt/SystemExit
             trend = "neutral"
             analysis = {}
 
@@ -1104,7 +1163,10 @@ def get_signals():
     """Get real trading signals for all symbols"""
     try:
         user_id = g.user_id
-        symbols = request.args.getlist('symbols', ['NIFTY', 'BANKNIFTY'])
+        # AUDIT FIX #2: getlist()'s 2nd arg is a value-coercion callable, NOT a
+        # default. Passing a list there made `?symbols=X` raise TypeError (->500)
+        # and made an absent param return [] instead of the intended default.
+        symbols = request.args.getlist('symbols') or ['NIFTY', 'BANKNIFTY']
 
         def _build_signals():
             signals = []
@@ -1201,14 +1263,13 @@ def generate_signals():
             return jsonify(result), 400
 
     except Exception as e:
-        logger.info(f"Signal generation error: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            "status": "error",
-            "message": str(e),
-            "user_id": user_id if 'user_id' in locals() else None
-        }), 500
+        # AUDIT FIX #13: log full detail server-side, but never return raw
+        # str(e) to the client (Tier 1 #2). server_error hides internals in
+        # production and only includes detail outside production.
+        logger.error(f"Signal generation error: {str(e)}", exc_info=True)
+        return APIResponse.server_error(
+            "Unable to generate signals right now. Please try again shortly.", e
+        )
 
 
 @app.route('/api/signals/batch-generate', methods=['POST'])
@@ -1236,11 +1297,11 @@ def batch_generate_signals():
         return jsonify(result), 200
 
     except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": str(e),
-            "user_id": user_id if 'user_id' in locals() else None
-        }), 500
+        # AUDIT FIX #14: don't leak raw str(e) to clients (Tier 1 #2).
+        logger.error(f"Batch signal generation error: {str(e)}", exc_info=True)
+        return APIResponse.server_error(
+            "Unable to generate signals right now. Please try again shortly.", e
+        )
 
 
 @app.route('/api/signals/history/<symbol>', methods=['GET'])
@@ -1997,27 +2058,13 @@ def serve_root():
 
 
 # ===== ERROR HANDLERS =====
-@app.errorhandler(404)
-def not_found(e):
-    return jsonify({
-        "status": "error",
-        "message": "Endpoint not found",
-        "path": request.path
-    }), 404
-
-@app.errorhandler(500)
-def server_error(e):
-    return jsonify({
-        "status": "error",
-        "message": "Internal server error"
-    }), 500
-
-@app.errorhandler(401)
-def unauthorized(e):
-    return jsonify({
-        "status": "error",
-        "message": "Unauthorized - valid token required"
-    }), 401
+# AUDIT FIX #12: the inline 404/500/401 handlers that used to live here were
+# registered AFTER register_error_handlers(app) ran, so they silently
+# OVERRODE the standardized handlers in error_handler.py — returning a
+# divergent {status, message[, path]} shape (and leaking request.path on 404)
+# instead of the canonical error envelope. They are removed so the
+# standardized, consistent handlers (NOT_FOUND / INTERNAL_ERROR / UNAUTHORIZED)
+# from error_handler.py take effect for every endpoint.
 
 # ===== RATE-LIMIT EXEMPTIONS (Tier 2 #6) =====
 # Applied here (end of module) so every health/metrics route is already
@@ -2067,6 +2114,9 @@ if __name__ == '__main__':
     logger.info(f"   Dashboard: http://localhost:{port}/dashboard (requires auth)")
     logger.info(separator + "\n")
 
-if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    # AUDIT FIX #10: consolidated the previously-duplicated __main__ block and
+    # switched the dev server from app.run() to socketio.run() so WebSocket
+    # support (Tier 2 #8) actually works when running locally. In production
+    # gunicorn imports `app` and neither block runs, so this is dev-only.
+    socketio.run(app, host='0.0.0.0', port=port, debug=False, use_reloader=False,
+                 allow_unsafe_werkzeug=True)

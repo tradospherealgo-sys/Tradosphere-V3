@@ -115,7 +115,10 @@ try:
     rc = c.get("/boom-custom")
     bodyc = rc.get_json()
     check("custom TradosphereException -> 404", rc.status_code == 404, f"got {rc.status_code}")
-    check("custom exception message surfaced", bodyc.get("error") == "widget not found", json.dumps(bodyc))
+    # AUDIT FIX #6: custom exceptions now use the SAME standardized envelope as
+    # every other endpoint -> error is an object {code, message}, not a string.
+    check("custom exception message surfaced",
+          bodyc.get("error", {}).get("message") == "widget not found", json.dumps(bodyc))
 
     ru = c.get("/boom-unexpected")
     bodyu = ru.get_json()

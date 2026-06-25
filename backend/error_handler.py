@@ -6,6 +6,7 @@ Catches all exceptions and returns properly formatted error responses
 import logging
 import time
 from flask import jsonify, request, g
+from werkzeug.exceptions import HTTPException
 from exceptions import TradosphereException, handle_exception
 from response_handler import APIResponse
 
@@ -17,14 +18,20 @@ def register_error_handlers(app):
 
     @app.errorhandler(TradosphereException)
     def handle_tradosphere_exception(error):
-        """Handle custom Tradosphere exceptions"""
+        """Handle custom Tradosphere exceptions.
+
+        AUDIT FIX #6: return the SAME standardized envelope as every other
+        endpoint (status/data/error{code,message}/timestamp) so clients can
+        parse error.code uniformly. Previously this returned a divergent shape
+        ({error: <string>, code, details}) that broke generic error parsing.
+        """
         handle_exception(error, context=error.__class__.__name__)
-        return jsonify({
-            "status": "error",
-            "error": error.message,
-            "code": error.error_code,
-            "details": error.details if error.details else None
-        }), error.status_code
+        return APIResponse.error(
+            code=error.error_code,
+            message=error.message,
+            http_status=error.status_code,
+            data=({"details": error.details} if error.details else None)
+        )
 
     @app.errorhandler(400)
     def bad_request(error):
@@ -99,9 +106,42 @@ def register_error_handlers(app):
             http_status=503
         )
 
+    @app.errorhandler(HTTPException)
+    def handle_http_exception(error):
+        """Handle ANY werkzeug HTTPException without a more-specific handler.
+
+        AUDIT FIX #3: the catch-all Exception handler below also matches
+        HTTPException subclasses, so codes lacking a dedicated handler
+        (405 Method Not Allowed, 408, 413, 415, 422, ...) were being mislabeled
+        as 500 UNEXPECTED_ERROR. This preserves the real HTTP status and emits
+        a clean, standardized body. Specific handlers (400/401/403/404/429/503)
+        still take precedence over this one.
+        """
+        code = error.code or 500
+        # Derive a stable machine code from the exception name, e.g.
+        # "MethodNotAllowed" -> "METHOD_NOT_ALLOWED".
+        import re
+        name = re.sub(r"(?<!^)(?=[A-Z])", "_", type(error).__name__).upper()
+        if code >= 500:
+            logger.error(f"HTTP {code} {name}: {error.description}", exc_info=True)
+        else:
+            logger.warning(f"HTTP {code} {name}: {error.description}")
+        return APIResponse.error(
+            code=name,
+            message=error.description or f"HTTP {code}",
+            http_status=code
+        )
+
     @app.errorhandler(Exception)
     def handle_unexpected(error):
-        """Handle unexpected errors"""
+        """Handle unexpected (non-HTTP) errors.
+
+        AUDIT FIX #3: defensively re-dispatch any HTTPException that reaches
+        here (e.g. raised after handler resolution) so it keeps its real status
+        instead of collapsing to 500.
+        """
+        if isinstance(error, HTTPException):
+            return handle_http_exception(error)
         logger.error(
             f"Unexpected error: {type(error).__name__}: {str(error)}",
             exc_info=True

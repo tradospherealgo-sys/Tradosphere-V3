@@ -374,6 +374,81 @@ except Exception as e:
 
 
 # ───────────────────────────────────────────────────────────────────
+print("\n=== AUDIT FIX REGRESSION CHECKS ===")
+try:
+    from tradosphere_saas_server_v3_1 import app as _app6, _is_origin_allowed
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    _app6.config["TESTING"] = True
+    c6 = _app6.test_client()
+
+    # FIX #1: ProxyFix is installed in the WSGI middleware chain (so remote_addr
+    # comes from X-Forwarded-For, not the Render proxy IP). We walk the wrapper
+    # chain because socketio/tenant middleware wrap it on the outside.
+    def _chain_has(wsgi, cls, depth=12):
+        seen = 0
+        while wsgi is not None and seen < depth:
+            if isinstance(wsgi, cls):
+                return True
+            wsgi = getattr(wsgi, "app", None) or getattr(wsgi, "wsgi_app", None)
+            seen += 1
+        return False
+    check("#1 ProxyFix present in WSGI chain (trusts X-Forwarded-For)",
+          _chain_has(_app6.wsgi_app, ProxyFix))
+
+    # FIX #3: HTTP errors without a dedicated handler keep their real status
+    r405 = c6.delete("/health")
+    b405 = r405.get_json()
+    check("#3 405 stays 405 (not collapsed to 500)", r405.status_code == 405, f"got {r405.status_code}")
+    check("#3 405 uses METHOD_NOT_ALLOWED code",
+          (b405 or {}).get("error", {}).get("code") == "METHOD_NOT_ALLOWED", json.dumps(b405)[:160])
+
+    # FIX #4: unmatched routes collapse into a single metrics bucket
+    c6.get("/scan/aaa"); c6.get("/scan/bbb"); c6.get("/scan/ccc")
+    from monitoring import performance_monitor as _pm
+    _eps = list(_pm.get_all_metrics()["endpoints"].keys())
+    leaked = [k for k in _eps if "/scan/" in k]
+    check("#4 404s do NOT create per-path metric buckets", leaked == [], f"leaked={leaked}")
+    check("#4 404s collapse into <unmatched> bucket",
+          any("<unmatched>" in k for k in _eps), f"eps sample={_eps[:5]}")
+
+    # FIX #5: CORS preflight only reflects allow-listed origins
+    check("#5 allow-list accepts *.vercel.app", _is_origin_allowed("https://x.vercel.app") is True)
+    check("#5 allow-list rejects arbitrary origin", _is_origin_allowed("https://evil.com") is False)
+    r_evil = c6.open("/api/health", method="OPTIONS", headers={"Origin": "https://evil.com"})
+    check("#5 preflight gives evil origin NO ACAO header",
+          r_evil.headers.get("Access-Control-Allow-Origin") is None,
+          str(r_evil.headers.get("Access-Control-Allow-Origin")))
+    r_good = c6.open("/api/health", method="OPTIONS", headers={"Origin": "https://tradosphere.in"})
+    check("#5 preflight reflects allowed origin",
+          r_good.headers.get("Access-Control-Allow-Origin") == "https://tradosphere.in",
+          str(r_good.headers.get("Access-Control-Allow-Origin")))
+
+    # FIX #8: monitor exposes raw error_count for exact aggregation
+    _epm = _pm.get_all_metrics()["endpoints"]
+    check("#8 endpoint metrics expose raw error_count",
+          all("error_count" in v for v in _epm.values()) if _epm else True)
+
+    # FIX #11: /refresh is NOT under the strict 10/min auth cap (default applies)
+    refresh_codes = [c6.post("/api/auth/refresh", json={"refresh_token": "x" * 12}).status_code
+                     for _ in range(14)]
+    check("#11 /refresh not strictly rate-limited (no 429 in 14 reqs)",
+          429 not in refresh_codes, f"codes={refresh_codes}")
+
+    # FIX #12: 404 now uses the standardized envelope (no inline override that
+    # leaked request.path / used a divergent shape)
+    r404 = c6.get("/definitely/not/a/route")
+    b404 = r404.get_json()
+    check("#12 404 uses standardized NOT_FOUND envelope",
+          r404.status_code == 404 and (b404 or {}).get("error", {}).get("code") == "NOT_FOUND",
+          json.dumps(b404)[:160])
+    check("#12 404 does NOT leak request.path",
+          "path" not in (b404 or {}), json.dumps(b404)[:160])
+except Exception as e:
+    import traceback; traceback.print_exc()
+    check("audit-fix regression checks", False, repr(e))
+
+
+# ───────────────────────────────────────────────────────────────────
 total = len(results)
 passed = sum(1 for _, ok, _ in results if ok)
 failed = total - passed
