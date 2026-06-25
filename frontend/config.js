@@ -13,7 +13,7 @@ else if (window.location.hostname.includes('vercel.app') || window.location.host
 }
 // Render deployment
 else if (window.location.hostname.includes('onrender.com') || window.location.hostname.includes('render.com')) {
-    window.API_BASE_URL = 'https://tradosphere.onrender.com'; // UPDATE THIS WITH YOUR RENDER BACKEND URL
+    window.API_BASE_URL = 'https://tradosphere-v3.onrender.com';
 }
 // Fallback
 else {
