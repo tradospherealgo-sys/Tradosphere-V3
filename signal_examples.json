@@ -1,0 +1,330 @@
+{
+  "examples": [
+    {
+      "id": "EXAMPLE_001",
+      "timestamp": "2026-06-25T09:45:32Z",
+      "symbol": "NIFTY50",
+      "spot_price": 23450.25,
+      "signal": "LONG_BUILDUP",
+      "strategy": "Equity",
+      "direction": "BULLISH",
+      "confidence_score": 87,
+      "action": "BUY",
+      "signal_wording": "Accumulation phase confirmed - Fresh call OI buildup with institutional positioning",
+      "recommendation": "🔵 LONG BUILDUP | Build position on dips | Higher targets forming",
+      "trade_setup": {
+        "entry": 23450.25,
+        "stop_loss": 23200.00,
+        "target_1": 23750.50,
+        "target_2": 24100.00,
+        "target_3": 24400.00,
+        "risk_reward_ratio": "1:2.5"
+      },
+      "technical_analysis": {
+        "trend": "Strong Uptrend",
+        "ema_alignment": "20 > 50 > 200",
+        "rsi": "45 (Healthy Zone)",
+        "bollinger_bands": "Price above 20-MA, trending inside bands",
+        "volume": "Above 20-day average - Confirmation present"
+      },
+      "options_context": {
+        "pcr_ratio": 0.62,
+        "pcr_signal": "Bullish (Low PCR)",
+        "call_oi_buildup": "+15.2%",
+        "max_pain": 24100,
+        "max_pain_bias": "Upside target aligns with smart money"
+      },
+      "market_regime": {
+        "regime": "TRENDING",
+        "regime_strength": "88%",
+        "volatility": "MEDIUM",
+        "trend_direction": "UP"
+      },
+      "risk_metrics": {
+        "risk_per_trade": "1.0%",
+        "position_size": "25 shares",
+        "max_loss": "₹6,256.25",
+        "daily_risk_remaining": "₹18,744"
+      },
+      "score_breakdown": {
+        "technical_indicators": 32,
+        "market_regime": 28,
+        "options_intelligence": 16,
+        "risk_validation": 9,
+        "total": 85
+      },
+      "premium_insights": {
+        "smart_money_activity": "Calls accumulating at 23500-24000 strikes",
+        "institutional_view": "Bullish positioning for expiry",
+        "liquidity_check": "High liquidity across strikes"
+      }
+    },
+    {
+      "id": "EXAMPLE_002",
+      "timestamp": "2026-06-25T11:15:48Z",
+      "symbol": "BANKNIFTY",
+      "spot_price": 48750.50,
+      "signal": "CALL_WRITING",
+      "strategy": "Options",
+      "direction": "BEARISH",
+      "confidence_score": 75,
+      "action": "WRITE_CALL",
+      "signal_wording": "Resistance rejection confirmed - Sell OTM calls to harvest premium at overhead supply",
+      "recommendation": "📝 CALL WRITING | Collect premium | Risk: Defined | High probability setup",
+      "trade_setup": {
+        "short_call_strike": 49000,
+        "short_call_premium": "₹185",
+        "stop_loss_strike": 49500,
+        "breakeven": 49185,
+        "max_profit": "₹185 (premium)",
+        "max_loss": "₹315 (technical loss at SL)"
+      },
+      "technical_analysis": {
+        "price_level": "At 100-day resistance",
+        "rejection_pattern": "Hammer candle at resistance",
+        "trend": "Consolidation with bearish bias",
+        "rsi": "68 (Approaching overbought)",
+        "support_below": "48500 (Recent support)"
+      },
+      "options_context": {
+        "pcr_ratio": 1.45,
+        "pcr_signal": "Bearish (High PCR)",
+        "call_oi": "Declining at higher strikes",
+        "put_oi_buildup": "+8.3% at lower strikes",
+        "iv_percentile": "62% (Elevated for selling)"
+      },
+      "market_regime": {
+        "regime": "RANGING",
+        "regime_strength": "72%",
+        "volatility": "MEDIUM-HIGH",
+        "trend_direction": "NEUTRAL"
+      },
+      "risk_metrics": {
+        "capital_requirement": "₹4,875 (margin)",
+        "risk_per_contract": "₹315",
+        "probability_of_profit": "68%",
+        "theta_decay_daily": "₹8.5"
+      },
+      "score_breakdown": {
+        "technical_indicators": 28,
+        "market_regime": 22,
+        "options_intelligence": 18,
+        "risk_validation": 9,
+        "total": 77
+      },
+      "premium_insights": {
+        "iv_crush_potential": "Post-resistance rejection, IV likely to compress",
+        "expiry_proximity": "8 days to expiry - Theta acceleration phase",
+        "greek_analysis": "Delta: -0.45 | Theta: +₹8.5/day | Vega: -0.12"
+      }
+    },
+    {
+      "id": "EXAMPLE_003",
+      "timestamp": "2026-06-25T13:22:15Z",
+      "symbol": "HDFCBANK",
+      "spot_price": 1875.35,
+      "signal": "PUT_WRITING",
+      "strategy": "Options",
+      "direction": "BULLISH",
+      "confidence_score": 82,
+      "action": "WRITE_PUT",
+      "signal_wording": "Support confirmed with bullish divergence - Sell OTM puts at floor for high probability premium",
+      "recommendation": "📝 PUT WRITING | Collect premium | Assigned at support is win | High conviction",
+      "trade_setup": {
+        "short_put_strike": 1850,
+        "short_put_premium": "₹62",
+        "stop_loss_strike": 1810,
+        "breakeven": 1788,
+        "max_profit": "₹62 (premium)",
+        "max_loss": "₹88 (if assigned)"
+      },
+      "technical_analysis": {
+        "price_level": "At 50-day support",
+        "bounce_pattern": "Bullish engulfing after 3-day selloff",
+        "trend": "Intraday recovery in downtrend",
+        "rsi": "35 (Oversold - ready to bounce)",
+        "macd": "Bullish crossover forming"
+      },
+      "options_context": {
+        "pcr_ratio": 0.95,
+        "pcr_signal": "Neutral leaning bullish",
+        "put_oi_buildup": "+12.1%",
+        "call_oi": "Stable",
+        "iv_rank": "72% (Elevated - good for selling)"
+      },
+      "market_regime": {
+        "regime": "VOLATILE",
+        "regime_strength": "85%",
+        "volatility": "HIGH",
+        "trend_direction": "DOWN (recovery bounce likely)"
+      },
+      "risk_metrics": {
+        "capital_requirement": "₹9,250 (margin)",
+        "risk_per_contract": "₹88",
+        "assignment_probability": "15% (favorable)",
+        "theta_decay_daily": "₹3.2"
+      },
+      "score_breakdown": {
+        "technical_indicators": 30,
+        "market_regime": 25,
+        "options_intelligence": 17,
+        "risk_validation": 9,
+        "total": 81
+      },
+      "premium_insights": {
+        "downside_limited": "Support at 1850 is 200+ below current price",
+        "risk_reward": "Risk ₹88 to make ₹62 premium - favorable odds",
+        "assignment_benefit": "If assigned at 1850, you get stock at discount"
+      }
+    },
+    {
+      "id": "EXAMPLE_004",
+      "timestamp": "2026-06-25T14:45:30Z",
+      "symbol": "NIFTY50",
+      "spot_price": 23580.50,
+      "signal": "MOMENTUM_LONG",
+      "strategy": "Equity",
+      "direction": "BULLISH",
+      "confidence_score": 91,
+      "action": "BUY",
+      "signal_wording": "Explosive uptrend with high momentum - Ride the wave with trailing stops, avoid shorts",
+      "recommendation": "⬆️ MOMENTUM LONG | Hold with conviction | Trail stops higher | Avoid shorts",
+      "trade_setup": {
+        "entry": 23580.50,
+        "entry_type": "Market on strength",
+        "initial_stop": 23350.00,
+        "trailing_stop_atr": 180.00,
+        "target_1": 23800.00,
+        "target_2": 24100.00,
+        "target_3": 24500.00,
+        "exit_strategy": "Trail stops up by 0.5 ATR every 1% profit"
+      },
+      "technical_analysis": {
+        "trend_strength": "Very Strong (EMA spread: 2.1%)",
+        "ema_alignment": "Perfectly bullish: 20 > 50 > 200",
+        "rsi": "62 (Strong without overbought)",
+        "price_above_all_emas": "✓ All moving averages acting as support",
+        "volume_trend": "Above average - Conviction present"
+      },
+      "options_context": {
+        "call_oi": "Increasing across strikes",
+        "put_oi": "Declining - No put support expected",
+        "pcr": 0.45,
+        "max_pain": 24000,
+        "sentiment": "Extremely bullish from OI perspective"
+      },
+      "market_regime": {
+        "regime": "TRENDING",
+        "regime_strength": "94%",
+        "volatility": "MEDIUM",
+        "atr": 180,
+        "trend_quality": "High momentum, low pullbacks"
+      },
+      "risk_metrics": {
+        "risk_per_trade": "0.9%",
+        "position_size": "27 shares",
+        "max_loss": "₹6,210",
+        "profit_target_ratio": "1:3.5"
+      },
+      "score_breakdown": {
+        "technical_indicators": 38,
+        "market_regime": 30,
+        "options_intelligence": 18,
+        "risk_validation": 10,
+        "total": 96
+      },
+      "premium_insights": {
+        "momentum_quality": "Highest confidence setup - Follow the trend",
+        "expected_move": "24500 is realistic target in strong trends like this",
+        "risk_management": "Trail stops to never give back more than 1 ATR"
+      }
+    },
+    {
+      "id": "EXAMPLE_005",
+      "timestamp": "2026-06-25T15:30:22Z",
+      "symbol": "MIDCAPNIFTY",
+      "spot_price": 8325.75,
+      "signal": "SHORT_BUILDUP",
+      "strategy": "Equity",
+      "direction": "BEARISH",
+      "confidence_score": 79,
+      "action": "SELL",
+      "signal_wording": "Distribution phase detected - Fresh put OI buildup signals institutional exit, expect weakness",
+      "recommendation": "🔴 SHORT BUILDUP | Reduce long exposure | Short on rallies | Downside forming",
+      "trade_setup": {
+        "short_entry": 8325.75,
+        "entry_trigger": "Rally to resistance 8400",
+        "stop_loss": 8475,
+        "target_1": 8200.00,
+        "target_2": 8050.00,
+        "target_3": 7900.00,
+        "risk_reward": "1:2.8"
+      },
+      "technical_analysis": {
+        "trend": "Downtrend forming",
+        "ema_alignment": "20 < 50 but > 200 (early downtrend)",
+        "rsi": "48 (In middle, but trending down)",
+        "resistance_above": "8400 (Recent range high)",
+        "support_below": "8200 (Breaking soon if confirmed)"
+      },
+      "options_context": {
+        "put_oi_buildup": "+18.5%",
+        "call_oi": "Declining at higher strikes",
+        "pcr": 1.35,
+        "pcr_signal": "Bearish",
+        "max_pain": 8200,
+        "smart_money": "Building put positions for downside"
+      },
+      "market_regime": {
+        "regime": "TRENDING",
+        "regime_strength": "78%",
+        "trend_direction": "DOWN",
+        "volatility": "MEDIUM"
+      },
+      "risk_metrics": {
+        "risk_per_trade": "1.1%",
+        "position_size": "12 shares (short)",
+        "max_loss": "₹1,803",
+        "daily_loss_remaining": "₹23,197"
+      },
+      "score_breakdown": {
+        "technical_indicators": 26,
+        "market_regime": 27,
+        "options_intelligence": 19,
+        "risk_validation": 9,
+        "total": 81
+      },
+      "premium_insights": {
+        "institutional_activity": "Large put OI increase suggests fund exit",
+        "risk_reward_favorable": "Risk 150 points for 425 points profit",
+        "timing_consideration": "Wait for rally to 8400 for better entry"
+      }
+    }
+  ],
+  "signal_characteristics": {
+    "professional_elements": [
+      "✓ Exact entry/SL/target prices",
+      "✓ Risk/reward ratios calculated",
+      "✓ Greeks analysis (Delta/Theta/Vega)",
+      "✓ Smart money positioning insights",
+      "✓ Probability calculations",
+      "✓ Margin requirements for options",
+      "✓ Theta decay daily benefit",
+      "✓ IV analysis for option selling",
+      "✓ Technical chart patterns",
+      "✓ Market regime classification"
+    ],
+    "modern_luxe_styling": [
+      "Emoji indicators for quick visual scanning",
+      "Color-coded confidence levels",
+      "Premium insights section",
+      "Greek analysis breakdown",
+      "Institutional positioning data",
+      "IV rank and percentile",
+      "Probability of profit calculations",
+      "Exact capital requirements",
+      "Expected daily theta decay",
+      "Assignment probability for puts"
+    ]
+  }
+}
