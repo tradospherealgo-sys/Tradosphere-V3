@@ -128,12 +128,14 @@
     </div>
 
     <script>
-        const API = window.API_BASE_URL || 'http://localhost:5001';
-        console.log('📍 Login page using API:', API);
-
         // Handle email/password login
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
+
+            // Get API URL after config.js has loaded
+            const API = window.API_BASE_URL || 'http://localhost:5001';
+            console.log('📍 Login page using API:', API);
+
             const email = document.getElementById('email').value.trim();
             const password = document.getElementById('password').value;
 
@@ -197,7 +199,9 @@
             console.log('✅ Google credential received');
             document.getElementById('loadingStatus').style.display = 'block';
 
+            // Get API URL after config.js has loaded
             const API = window.API_BASE_URL || 'http://localhost:5001';
+            console.log('📍 Google OAuth using API:', API);
             fetch(`${API}/api/auth/google`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
