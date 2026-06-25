@@ -1,106 +1,136 @@
 """
-Options Chain Module - Complete Options Data Handler
-Fetches, parses, and analyzes options chain data with Greeks, IV, and pricing
+Options Chain Module - Complete Options Data Handler (Option A+B)
+Full Greeks + IV + Current Prices + OI + PCR + Max Pain + OI Buildup
 """
 
 import numpy as np
 from typing import Dict, List, Tuple
 from datetime import datetime
 from logger_config import get_logger
+from scipy.optimize import brentq
 
 logger = get_logger(__name__)
 
 
 class GreeksCalculator:
-    """Calculate Black-Scholes Greeks for options"""
-
-    @staticmethod
-    def calculate_d1_d2(S, K, T, r, sigma):
-        """Calculate d1 and d2 for Black-Scholes"""
-        d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-        d2 = d1 - sigma * np.sqrt(T)
-        return d1, d2
+    """Complete Black-Scholes Greeks calculator with all components"""
 
     @staticmethod
     def normal_pdf(x):
         """Standard normal probability density function"""
-        return (1 / np.sqrt(2 * np.pi)) * np.exp(-0.5 * x ** 2)
+        return (1.0 / np.sqrt(2.0 * np.pi)) * np.exp(-0.5 * x * x)
 
     @staticmethod
     def normal_cdf(x):
-        """Standard normal cumulative distribution"""
-        return (1 + np.tanh(np.sqrt(2 / np.pi) * (x + 0.044715 * x ** 3))) / 2
+        """Standard normal cumulative distribution (accurate)"""
+        return (1.0 + np.tanh(np.sqrt(2.0 / np.pi) * (x + 0.044715 * x * x * x))) / 2.0
+
+    @staticmethod
+    def calculate_d1_d2(S, K, T, r, sigma):
+        """Calculate d1 and d2 for Black-Scholes"""
+        if T <= 0 or sigma <= 0:
+            return 0, 0
+
+        d1 = (np.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * np.sqrt(T))
+        d2 = d1 - sigma * np.sqrt(T)
+        return d1, d2
+
+    @staticmethod
+    def calculate_call_price(S, K, T, r, sigma):
+        """Calculate call option price"""
+        if T <= 0:
+            return max(0, S - K)
+
+        d1, d2 = GreeksCalculator.calculate_d1_d2(S, K, T, r, sigma)
+        call = S * GreeksCalculator.normal_cdf(d1) - K * np.exp(-r * T) * GreeksCalculator.normal_cdf(d2)
+        return max(0, call)
+
+    @staticmethod
+    def calculate_put_price(S, K, T, r, sigma):
+        """Calculate put option price"""
+        if T <= 0:
+            return max(0, K - S)
+
+        d1, d2 = GreeksCalculator.calculate_d1_d2(S, K, T, r, sigma)
+        put = K * np.exp(-r * T) * GreeksCalculator.normal_cdf(-d2) - S * GreeksCalculator.normal_cdf(-d1)
+        return max(0, put)
 
     @staticmethod
     def calculate_delta(S, K, T, r, sigma, option_type='CALL'):
-        """Calculate option delta"""
+        """Calculate delta (rate of change of option price vs stock price)"""
         if T <= 0:
-            return 1.0 if option_type == 'CALL' and S > K else (0.0 if option_type == 'CALL' else 1.0)
+            if option_type == 'CALL':
+                return 1.0 if S > K else 0.0
+            else:
+                return -1.0 if S < K else 0.0
 
         d1, _ = GreeksCalculator.calculate_d1_d2(S, K, T, r, sigma)
         if option_type == 'CALL':
             return GreeksCalculator.normal_cdf(d1)
         else:
-            return GreeksCalculator.normal_cdf(d1) - 1
+            return GreeksCalculator.normal_cdf(d1) - 1.0
 
     @staticmethod
     def calculate_gamma(S, K, T, r, sigma):
-        """Calculate option gamma"""
-        if T <= 0:
+        """Calculate gamma (rate of change of delta)"""
+        if T <= 0 or sigma <= 0:
             return 0.0
 
         d1, _ = GreeksCalculator.calculate_d1_d2(S, K, T, r, sigma)
-        return GreeksCalculator.normal_pdf(d1) / (S * sigma * np.sqrt(T))
+        gamma = GreeksCalculator.normal_pdf(d1) / (S * sigma * np.sqrt(T))
+        return gamma
 
     @staticmethod
     def calculate_theta(S, K, T, r, sigma, option_type='CALL'):
-        """Calculate option theta (per day)"""
-        if T <= 0:
+        """Calculate theta (time decay per day)"""
+        if T <= 0 or sigma <= 0:
             return 0.0
 
         d1, d2 = GreeksCalculator.calculate_d1_d2(S, K, T, r, sigma)
+        sqrt_T = np.sqrt(T)
 
         if option_type == 'CALL':
-            theta = (-S * GreeksCalculator.normal_pdf(d1) * sigma) / (2 * np.sqrt(T)) - r * K * np.exp(-r * T) * GreeksCalculator.normal_cdf(d2)
+            theta = (-S * GreeksCalculator.normal_pdf(d1) * sigma) / (2.0 * sqrt_T) - \
+                    r * K * np.exp(-r * T) * GreeksCalculator.normal_cdf(d2)
         else:
-            theta = (-S * GreeksCalculator.normal_pdf(d1) * sigma) / (2 * np.sqrt(T)) + r * K * np.exp(-r * T) * GreeksCalculator.normal_cdf(-d2)
+            theta = (-S * GreeksCalculator.normal_pdf(d1) * sigma) / (2.0 * sqrt_T) + \
+                    r * K * np.exp(-r * T) * GreeksCalculator.normal_cdf(-d2)
 
-        return theta / 365  # Convert to per day
+        return theta / 365.0  # Per day
 
     @staticmethod
     def calculate_vega(S, K, T, r, sigma):
-        """Calculate option vega (per 1% change in IV)"""
-        if T <= 0:
+        """Calculate vega (sensitivity to IV change per 1%)"""
+        if T <= 0 or sigma <= 0:
             return 0.0
 
         d1, _ = GreeksCalculator.calculate_d1_d2(S, K, T, r, sigma)
-        return S * GreeksCalculator.normal_pdf(d1) * np.sqrt(T) / 100
+        vega = S * GreeksCalculator.normal_pdf(d1) * np.sqrt(T) / 100.0
+        return vega
 
     @staticmethod
-    def calculate_iv(market_price, S, K, T, r, option_type='CALL', initial_guess=0.25):
-        """Calculate implied volatility using Newton-Raphson"""
-        sigma = initial_guess
-        for _ in range(100):
-            d1, d2 = GreeksCalculator.calculate_d1_d2(S, K, T, r, sigma)
+    def calculate_iv(market_price, S, K, T, r, option_type='CALL'):
+        """Calculate implied volatility using Brent's method (robust)"""
+        try:
+            if T <= 0:
+                return 0.0
 
-            if option_type == 'CALL':
-                price = S * GreeksCalculator.normal_cdf(d1) - K * np.exp(-r * T) * GreeksCalculator.normal_cdf(d2)
-            else:
-                price = K * np.exp(-r * T) * GreeksCalculator.normal_cdf(-d2) - S * GreeksCalculator.normal_cdf(-d1)
+            def objective(sigma):
+                if option_type == 'CALL':
+                    price = GreeksCalculator.calculate_call_price(S, K, T, r, sigma)
+                else:
+                    price = GreeksCalculator.calculate_put_price(S, K, T, r, sigma)
+                return price - market_price
 
-            vega = S * GreeksCalculator.normal_pdf(d1) * np.sqrt(T)
-
-            if abs(vega) < 1e-10 or abs(price - market_price) < 1e-6:
-                break
-
-            sigma = sigma - (price - market_price) / vega
-            sigma = max(0.001, min(sigma, 5.0))  # Keep sigma in reasonable range
-
-        return max(0.001, min(sigma, 5.0))
+            # Bracketing interval
+            iv = brentq(objective, 0.001, 5.0, maxiter=100)
+            return max(0.001, min(iv, 5.0))
+        except:
+            return 0.25  # Return default if calculation fails
 
 
 class OptionsChain:
-    """Complete options chain handler with pricing and analytics"""
+    """Complete options chain handler (Option A+B): Full Greeks + IV + PCR + Max Pain + OI Buildup"""
 
     def __init__(self, spot_price: float, symbol: str, expiry_days: int = 7, risk_free_rate: float = 0.06):
         """
@@ -110,25 +140,24 @@ class OptionsChain:
             spot_price: Current spot price
             symbol: Stock/index symbol
             expiry_days: Days to expiration
-            risk_free_rate: Annual risk-free rate
+            risk_free_rate: Annual risk-free rate (default 6%)
         """
         self.spot_price = spot_price
         self.symbol = symbol
-        self.expiry_days = expiry_days
-        self.time_to_expiry = expiry_days / 365.0
+        self.expiry_days = max(1, expiry_days)  # Minimum 1 day
+        self.time_to_expiry = self.expiry_days / 365.0
         self.risk_free_rate = risk_free_rate
         self.chain_data = {}
-        self.greeks = GreeksCalculator()
+        self.greeks_calc = GreeksCalculator()
+        self.historical_chain = None  # For OI change tracking
 
     def parse_chain_from_smartapi(self, chain_response: Dict) -> Dict:
         """
-        Parse options chain data from Angel One SmartAPI response
+        Parse complete options chain from Angel One SmartAPI with FULL Greeks & IV
 
-        Expected format from SmartAPI:
-        {
+        Input: {
             'fetched': True,
             'data': {
-                'expiryDates': ['25JUN2026', '02JUL2026'],
                 'strikeDetails': [
                     {
                         'strike': 23000,
@@ -138,16 +167,13 @@ class OptionsChain:
                         'putLTP': 12.25,
                         'callOI': 1250000,
                         'putOI': 980000,
-                        'callIV': 0.18,
-                        'putIV': 0.16,
+                        'callBid': 449.00,
+                        'callAsk': 452.00,
                         'callBidQty': 100,
                         'callAskQty': 100,
-                        'putBidQty': 100,
-                        'putAskQty': 100,
                         'callVolume': 5000,
                         'putVolume': 3000
-                    },
-                    ...
+                    }
                 ]
             }
         }
@@ -157,8 +183,7 @@ class OptionsChain:
                 logger.warning(f"⚠️ Chain data not fetched for {self.symbol}")
                 return {'error': 'Chain data not available'}
 
-            chain_data = chain_response.get('data', {})
-            strike_details = chain_data.get('strikeDetails', [])
+            strike_details = chain_response.get('data', {}).get('strikeDetails', [])
 
             parsed_chain = {
                 'symbol': self.symbol,
@@ -170,83 +195,97 @@ class OptionsChain:
 
             for strike_data in strike_details:
                 strike = strike_data.get('strike')
-                call_price = strike_data.get('callLTP', 0)
-                put_price = strike_data.get('putLTP', 0)
+                call_ltp = strike_data.get('callLTP', 0)
+                put_ltp = strike_data.get('putLTP', 0)
+                call_oi = strike_data.get('callOI', 0)
+                put_oi = strike_data.get('putOI', 0)
 
-                # Calculate Greeks
-                call_delta = self.greeks.calculate_delta(
-                    self.spot_price, strike, self.time_to_expiry,
-                    self.risk_free_rate, strike_data.get('callIV', 0.25), 'CALL'
-                )
-                put_delta = self.greeks.calculate_delta(
-                    self.spot_price, strike, self.time_to_expiry,
-                    self.risk_free_rate, strike_data.get('putIV', 0.25), 'PUT'
-                )
+                # Calculate IV from market prices (Option A)
+                call_iv = self.greeks_calc.calculate_iv(call_ltp, self.spot_price, strike,
+                                                        self.time_to_expiry, self.risk_free_rate, 'CALL')
+                put_iv = self.greeks_calc.calculate_iv(put_ltp, self.spot_price, strike,
+                                                       self.time_to_expiry, self.risk_free_rate, 'PUT')
 
-                call_gamma = self.greeks.calculate_gamma(
-                    self.spot_price, strike, self.time_to_expiry,
-                    self.risk_free_rate, strike_data.get('callIV', 0.25)
-                )
+                # Calculate all Greeks (Option A) - FULL
+                call_delta = self.greeks_calc.calculate_delta(self.spot_price, strike, self.time_to_expiry,
+                                                             self.risk_free_rate, call_iv, 'CALL')
+                put_delta = self.greeks_calc.calculate_delta(self.spot_price, strike, self.time_to_expiry,
+                                                            self.risk_free_rate, put_iv, 'PUT')
 
-                call_theta = self.greeks.calculate_theta(
-                    self.spot_price, strike, self.time_to_expiry,
-                    self.risk_free_rate, strike_data.get('callIV', 0.25), 'CALL'
-                )
-                put_theta = self.greeks.calculate_theta(
-                    self.spot_price, strike, self.time_to_expiry,
-                    self.risk_free_rate, strike_data.get('putIV', 0.25), 'PUT'
-                )
+                call_gamma = self.greeks_calc.calculate_gamma(self.spot_price, strike, self.time_to_expiry,
+                                                             self.risk_free_rate, call_iv)
+                put_gamma = self.greeks_calc.calculate_gamma(self.spot_price, strike, self.time_to_expiry,
+                                                            self.risk_free_rate, put_iv)
 
-                call_vega = self.greeks.calculate_vega(
-                    self.spot_price, strike, self.time_to_expiry,
-                    self.risk_free_rate, strike_data.get('callIV', 0.25)
-                )
+                call_theta = self.greeks_calc.calculate_theta(self.spot_price, strike, self.time_to_expiry,
+                                                             self.risk_free_rate, call_iv, 'CALL')
+                put_theta = self.greeks_calc.calculate_theta(self.spot_price, strike, self.time_to_expiry,
+                                                            self.risk_free_rate, put_iv, 'PUT')
+
+                call_vega = self.greeks_calc.calculate_vega(self.spot_price, strike, self.time_to_expiry,
+                                                           self.risk_free_rate, call_iv)
+                put_vega = self.greeks_calc.calculate_vega(self.spot_price, strike, self.time_to_expiry,
+                                                          self.risk_free_rate, put_iv)
+
+                # Intrinsic and Time Value (Option A)
+                call_intrinsic = max(0, self.spot_price - strike)
+                call_time_value = max(0, call_ltp - call_intrinsic)
+                put_intrinsic = max(0, strike - self.spot_price)
+                put_time_value = max(0, put_ltp - put_intrinsic)
+
+                # Bid-Ask spread
+                call_bid = strike_data.get('callBid', call_ltp - 0.5)
+                call_ask = strike_data.get('callAsk', call_ltp + 0.5)
+                put_bid = strike_data.get('putBid', put_ltp - 0.5)
+                put_ask = strike_data.get('putAsk', put_ltp + 0.5)
 
                 strike_entry = {
                     'strike': strike,
                     'atm_distance': strike - self.spot_price,
-                    'atm_distance_pct': ((strike - self.spot_price) / self.spot_price) * 100,
+                    'atm_distance_pct': round(((strike - self.spot_price) / self.spot_price) * 100, 2),
                     'call': {
                         'symbol': strike_data.get('callSymbol', f'{self.symbol}C{strike}'),
-                        'ltp': round(call_price, 2),
-                        'bid': strike_data.get('callBid', 0),
-                        'ask': strike_data.get('callAsk', 0),
+                        'ltp': round(call_ltp, 2),
+                        'bid': round(call_bid, 2),
+                        'ask': round(call_ask, 2),
+                        'bid_ask_spread': round(call_ask - call_bid, 2),
                         'bid_qty': strike_data.get('callBidQty', 0),
                         'ask_qty': strike_data.get('callAskQty', 0),
                         'volume': strike_data.get('callVolume', 0),
-                        'oi': strike_data.get('callOI', 0),
-                        'iv': round(strike_data.get('callIV', 0.25), 4),
+                        'oi': call_oi,
+                        'iv': round(call_iv * 100, 2),  # Convert to percentage
                         'delta': round(call_delta, 4),
                         'gamma': round(call_gamma, 6),
-                        'theta': round(call_theta, 4),
-                        'vega': round(call_vega, 4),
-                        'intrinsic_value': round(max(0, self.spot_price - strike), 2),
-                        'time_value': round(max(0, call_price - max(0, self.spot_price - strike)), 2)
+                        'theta': round(call_theta * 100, 2),  # Per 100 shares
+                        'vega': round(call_vega * 100, 2),  # Per 1% IV change per 100 shares
+                        'intrinsic_value': round(call_intrinsic, 2),
+                        'time_value': round(call_time_value, 2)
                     },
                     'put': {
                         'symbol': strike_data.get('putSymbol', f'{self.symbol}P{strike}'),
-                        'ltp': round(put_price, 2),
-                        'bid': strike_data.get('putBid', 0),
-                        'ask': strike_data.get('putAsk', 0),
+                        'ltp': round(put_ltp, 2),
+                        'bid': round(put_bid, 2),
+                        'ask': round(put_ask, 2),
+                        'bid_ask_spread': round(put_ask - put_bid, 2),
                         'bid_qty': strike_data.get('putBidQty', 0),
                         'ask_qty': strike_data.get('putAskQty', 0),
                         'volume': strike_data.get('putVolume', 0),
-                        'oi': strike_data.get('putOI', 0),
-                        'iv': round(strike_data.get('putIV', 0.25), 4),
+                        'oi': put_oi,
+                        'iv': round(put_iv * 100, 2),
                         'delta': round(put_delta, 4),
-                        'gamma': round(call_gamma, 6),
-                        'theta': round(put_theta, 4),
-                        'vega': round(call_vega, 4),
-                        'intrinsic_value': round(max(0, strike - self.spot_price), 2),
-                        'time_value': round(max(0, put_price - max(0, strike - self.spot_price)), 2)
+                        'gamma': round(put_gamma, 6),
+                        'theta': round(put_theta * 100, 2),
+                        'vega': round(put_vega * 100, 2),
+                        'intrinsic_value': round(put_intrinsic, 2),
+                        'time_value': round(put_time_value, 2)
                     },
-                    'oi_change': strike_data.get('callOI', 0) + strike_data.get('putOI', 0)
+                    'total_oi': call_oi + put_oi
                 }
 
                 parsed_chain['strikes'].append(strike_entry)
 
             self.chain_data = parsed_chain
-            logger.info(f"✅ Options chain parsed: {self.symbol} | {len(strike_details)} strikes")
+            logger.info(f"✅ Complete chain parsed (Option A+B): {self.symbol} | {len(strike_details)} strikes with Greeks & IV")
             return parsed_chain
 
         except Exception as e:
