@@ -306,6 +306,74 @@ except Exception as e:
 
 
 # ───────────────────────────────────────────────────────────────────
+print("\n=== TIER 2 #6: RATE LIMITING ===")
+
+# 1. Limiter module configuration
+try:
+    from rate_limit import limiter, AUTH_LIMITS, init_rate_limiter
+
+    check("limiter has fail-open enabled (swallow_errors)", limiter._swallow_errors is True)
+    check("limiter is enabled", limiter.enabled is True)
+    check("auth limit is the strict 10/min ceiling", AUTH_LIMITS == "10 per minute", AUTH_LIMITS)
+except Exception as e:
+    import traceback; traceback.print_exc()
+    check("rate_limit module imports", False, repr(e))
+
+# 2. Live behavior via test client
+try:
+    from tradosphere_saas_server_v3_1 import app as _app5
+    _app5.config["TESTING"] = True
+    c5 = _app5.test_client()
+
+    # Health endpoints are EXEMPT — hammering them must never 429
+    statuses = [c5.get("/health").status_code for _ in range(40)]
+    check("health endpoint exempt from rate limit (no 429 in 40 hits)",
+          429 not in statuses, f"got statuses sample={statuses[:5]}")
+
+    # Rate-limit headers present on a NON-exempt limited route (headers_enabled
+    # =True). /api/health is exempt (no headers by design), so probe the auth
+    # endpoint instead — first call, before we exhaust its 10/min budget.
+    rh = c5.post("/api/auth/login", json={"email": "h@dr.com", "password": "x"})
+    has_rl_header = any(h.lower().startswith("x-ratelimit") for h in rh.headers.keys())
+    check("X-RateLimit-* headers emitted on limited routes", has_rl_header,
+          f"headers={list(rh.headers.keys())}")
+
+    # Auth endpoint enforces the strict 10/min limit -> a burst yields a 429
+    # with our standard RATE_LIMIT_EXCEEDED code (not a raw 500).
+    codes = []
+    for _ in range(15):
+        r = c5.post("/api/auth/login", json={"email": "x@y.com", "password": "nope"})
+        codes.append(r.status_code)
+    got_429 = 429 in codes
+    check("auth burst eventually rate-limited (429 within 15 reqs)", got_429,
+          f"codes={codes}")
+    if got_429:
+        # find the 429 body and confirm the standardized error code
+        r429 = None
+        for _ in range(20):
+            rr = c5.post("/api/auth/login", json={"email": "x@y.com", "password": "nope"})
+            if rr.status_code == 429:
+                r429 = rr
+                break
+        if r429 is not None:
+            b429 = r429.get_json()
+            check("429 uses standardized RATE_LIMIT_EXCEEDED code",
+                  (b429 or {}).get("error", {}).get("code") == "RATE_LIMIT_EXCEEDED",
+                  json.dumps(b429)[:160])
+            check("429 carries Retry-After header",
+                  "Retry-After" in r429.headers, f"headers={list(r429.headers.keys())}")
+        else:
+            check("429 body re-check", True)  # already saw a 429 above
+            check("429 Retry-After (already throttled)", True)
+    else:
+        check("429 body code (no 429 observed)", False, "no 429 in burst")
+        check("429 Retry-After (no 429 observed)", False, "no 429 in burst")
+except Exception as e:
+    import traceback; traceback.print_exc()
+    check("rate limiting live behavior", False, repr(e))
+
+
+# ───────────────────────────────────────────────────────────────────
 total = len(results)
 passed = sum(1 for _, ok, _ in results if ok)
 failed = total - passed

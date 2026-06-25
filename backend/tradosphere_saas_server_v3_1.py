@@ -203,6 +203,12 @@ logger.info("✅ Input validation schemas loaded (Tier 2 #7)")
 from cache import cache, cache_get_or_set
 logger.info(f"✅ Cache layer loaded (Tier 2 #9) — enabled={cache.enabled}")
 
+# ===== API RATE LIMITING (Tier 2 #6) =====
+# Init early so the limiter is bound before blueprints register. Limits are
+# Redis-backed (shared across workers) and FAIL-OPEN if storage is down.
+from rate_limit import init_rate_limiter, limiter, AUTH_LIMITS
+init_rate_limiter(app)
+
 # ===== REAL-TIME WEBSOCKETS (Tier 2 #8) =====
 from realtime import (
     init_socketio, socketio, emit_signal_update, start_price_broadcaster
@@ -257,6 +263,13 @@ app.register_blueprint(admin_bp)
 app.register_blueprint(leads_bp)
 app.register_blueprint(trading_bp)
 app.register_blueprint(backtest_bp)
+
+# ===== APPLY RATE LIMITS (Tier 2 #6) =====
+# Strict ceiling on the auth blueprint (brute-force / credential-stuffing).
+# (Monitoring-probe exemptions are applied at the end of the module, after the
+# health/metrics routes are defined — see "RATE-LIMIT EXEMPTIONS" below.)
+limiter.limit(AUTH_LIMITS)(auth_bp)
+logger.info("✅ Strict rate limits applied to auth blueprint (Tier 2 #6)")
 
 # Register multi-tenant middleware
 MultiTenantMiddleware.register_tenant_middleware(app) if hasattr(MultiTenantMiddleware, 'register_tenant_middleware') else None
@@ -2005,6 +2018,16 @@ def unauthorized(e):
         "status": "error",
         "message": "Unauthorized - valid token required"
     }), 401
+
+# ===== RATE-LIMIT EXEMPTIONS (Tier 2 #6) =====
+# Applied here (end of module) so every health/metrics route is already
+# defined. Uptime probes, metrics scrapers and deep-health checks must never
+# be throttled by the default limits.
+for _ep in ("health_check", "health", "health_detailed", "metrics", "health_deep"):
+    _vf = app.view_functions.get(_ep)
+    if _vf is not None:
+        limiter.exempt(_vf)
+logger.info("✅ Monitoring endpoints exempted from rate limits (Tier 2 #6)")
 
 # ===== STARTUP =====
 if __name__ == '__main__':
