@@ -1,20 +1,94 @@
+# ============================================================================
+# Tradosphere V3.1 — Render deployment blueprint
+# ----------------------------------------------------------------------------
+# All `sync: false` vars are SECRETS: Render will NOT read them from this file
+# and they are NEVER committed. You must set each one in the Render dashboard
+# (Service → Environment) before the service can boot in production. The app
+# fails fast on missing/weak SECRET_KEY / JWT_SECRET, so set those first.
+# ============================================================================
 services:
   - type: web
     name: tradosphere-v3
     env: python
     region: oregon
+
+    # ⚠️ LAUNCH DECISION (Gate 4): `free` dynos SLEEP after ~15 min idle, which
+    # kills the background WebSocket broadcaster and the 4-hour Angel One token
+    # refresh — not viable for a 24x7 trading product. For launch, change this
+    # to `starter` (or higher). This is a billing decision, so it's left to you:
+    #   plan: starter
     plan: free
+
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --worker-class gthread --workers 1 --threads 8 --timeout 120
+
     envVars:
+      # ---- Runtime (safe to keep in this file) ----
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: FLASK_ENV
+        value: production
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "false"
       - key: ENABLE_WS_BROADCASTER
         value: "true"
-      # Provision a Render "Key Value" (Redis) instance and paste its
-      # Internal URL here (or set in the dashboard). If unset, the app runs
-      # uncached — caching fails open and never blocks requests.
+      - key: LOG_DIR
+        value: /tmp/tradosphere-logs   # writable on Render; file logs are best-effort
+      - key: APP_VERSION
+        value: "3.1.0"
+
+      # ---- Security secrets (set in dashboard) ----
+      - key: SECRET_KEY            # python3 -c "import secrets;print(secrets.token_urlsafe(48))"
+        sync: false
+      - key: JWT_SECRET            # python3 -c "import secrets;print(secrets.token_urlsafe(48))"
+        sync: false
+
+      # ---- Database ----
+      - key: DATABASE_URL          # prod Postgres connection string
+        sync: false
+
+      # ---- Angel One SmartAPI (live market data) ----
+      - key: ANGEL_ONE_API_KEY
+        sync: false
+      - key: ANGEL_ONE_CLIENT_CODE
+        sync: false
+      - key: ANGEL_ONE_PIN
+        sync: false
+      - key: ANGEL_ONE_TOTP_SECRET
+        sync: false
+
+      # ---- Stripe (use LIVE keys: sk_live_… / pk_live_…) ----
+      - key: STRIPE_API_KEY
+        sync: false
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
+
+      # ---- Email (SendGrid or SMTP) ----
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: FROM_EMAIL
+        sync: false
+
+      # ---- Google OAuth ----
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+
+      # ---- Claude AI ----
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+      # ---- Cache / rate-limit store (Render Key Value) ----
       - key: REDIS_URL
+        sync: false
+
+      # ---- CORS: your production frontend origin(s), comma-separated ----
+      - key: CORS_ORIGINS          # e.g. https://app.tradosphere.in,https://tradosphere.in
+        sync: false
+
+      # ---- Error tracking (optional but recommended) ----
+      - key: SENTRY_DSN
         sync: false

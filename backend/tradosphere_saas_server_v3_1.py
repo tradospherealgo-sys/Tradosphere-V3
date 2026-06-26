@@ -138,6 +138,13 @@ _ALLOWED_ORIGINS = [
     "https://tradosphere-v3.onrender.com",
 ]
 
+# Allow additional production origins via env (comma-separated) without a code
+# change, e.g. CORS_ORIGINS="https://app.mydomain.com,https://mydomain.com".
+_extra_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+for _o in _extra_origins:
+    if _o not in _ALLOWED_ORIGINS:
+        _ALLOWED_ORIGINS.append(_o)
+
 
 def _is_origin_allowed(origin: str) -> bool:
     """Match an Origin against the allow-list, supporting a single `*` wildcard
@@ -192,8 +199,63 @@ def handle_preflight():
         return response, 200
 
 # Configuration
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'tradosphere-secret-key')
-app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET', 'jwt-secret-key')
+# ===== SECURITY GATE: secrets must be strong in production =====
+# Previously SECRET_KEY/JWT_SECRET fell back to well-known hardcoded defaults
+# ('tradosphere-secret-key' / 'jwt-secret-key'). Anyone could forge sessions or
+# JWTs with those. In production we now FAIL FAST if a secret is missing or left
+# at a known-weak default; in development we generate a random ephemeral secret
+# so local dev still works without configuration.
+import secrets as _secrets
+
+_IS_PROD = os.getenv("FLASK_ENV", "production").lower() == "production"
+_WEAK_SECRETS = {
+    "", "tradosphere-secret-key", "jwt-secret-key",
+    "change-me", "changeme", "secret", "<generate-strong-secret-key>",
+}
+
+
+def _require_secret(env_name: str) -> str:
+    """Return a strong secret from env, or fail fast in prod / generate in dev."""
+    value = (os.getenv(env_name) or "").strip()
+    if value in _WEAK_SECRETS or len(value) < 16:
+        if _IS_PROD:
+            raise RuntimeError(
+                f"SECURITY: {env_name} is missing or weak. Set a strong (>=32 char) "
+                f"random value in the environment before starting in production. "
+                f"Generate one with: python3 -c \"import secrets; print(secrets.token_urlsafe(48))\""
+            )
+        # Development: ephemeral random secret (sessions reset on restart).
+        logger.warning(f"⚠️  {env_name} not set — using an ephemeral dev secret (DEV ONLY).")
+        return _secrets.token_urlsafe(48)
+    return value
+
+
+app.config['SECRET_KEY'] = _require_secret('SECRET_KEY')
+app.config['JWT_SECRET_KEY'] = _require_secret('JWT_SECRET')
+
+# ===== SECURITY GATE: secure session cookies in production =====
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=_IS_PROD,   # HTTPS-only cookies in production
+    PREFERRED_URL_SCHEME="https" if _IS_PROD else "http",
+)
+
+# ===== COMPLIANCE GATE: trading risk disclaimer =====
+# Signals are algorithmic outputs, NOT investment advice. This disclaimer is
+# attached to signal responses and exposed at /api/disclaimer so the frontend
+# can surface it. (This is standard product copy, not legal advice — have a
+# professional review your final Terms before taking paid users.)
+TRADING_DISCLAIMER = (
+    "Tradosphere provides algorithmically generated market analysis for "
+    "educational and informational purposes only. It is NOT investment advice, "
+    "a recommendation, or a solicitation to buy or sell any security. Trading in "
+    "equities, derivatives, and options carries substantial risk of loss and is "
+    "not suitable for every investor. Past performance does not guarantee future "
+    "results. You are solely responsible for your own trading decisions. Consult "
+    "a SEBI-registered financial advisor before trading."
+)
+DISCLAIMER_VERSION = "2026-06-26"
 
 # Register error handlers and logging middleware
 from error_handler import register_error_handlers, register_logging_middleware
@@ -436,7 +498,7 @@ def _retry_broker_connection():
 
 # Start background retry thread (only if initial init failed)
 if market is None:
-    print("🔄 Starting background broker reconnection thread...")
+    logger.info("🔄 Starting background broker reconnection thread...")
     retry_thread = threading.Thread(target=_retry_broker_connection, daemon=True)
     retry_thread.start()
 
@@ -2012,6 +2074,18 @@ def _quick_signal_for_symbol(symbol, broker_live):
         return _quick_hold_signal(symbol, "Awaiting sufficient market data")
 
 
+@app.route('/api/disclaimer', methods=['GET'])
+def get_disclaimer():
+    """Public trading risk disclaimer (COMPLIANCE GATE). The frontend should
+    surface this on signal views and at signup/checkout."""
+    return jsonify({
+        "status": "success",
+        "disclaimer": TRADING_DISCLAIMER,
+        "version": DISCLAIMER_VERSION,
+        "timestamp": datetime.utcnow().isoformat() + 'Z'
+    }), 200
+
+
 @app.route('/api/generate', methods=['POST'])
 def generate_quick_signals():
     """
@@ -2050,6 +2124,7 @@ def generate_quick_signals():
             "message": f"{len(signals)} signals generated",
             "data_status": public_data_status,  # 'live' or 'delayed' (user-facing)
             "signals": signals,
+            "disclaimer": TRADING_DISCLAIMER,  # COMPLIANCE GATE
             "timestamp": datetime.utcnow().isoformat() + 'Z'
         }), 200
 

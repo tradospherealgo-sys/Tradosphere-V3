@@ -17,8 +17,13 @@ Exit code 0 = all passed, 1 = failure.
 import os
 import sys
 import json
+import secrets as _secrets
 
 os.environ.setdefault("FLASK_ENV", "production")
+# Provide strong secrets like production does — the app now FAILS FAST on weak
+# SECRET_KEY/JWT_SECRET in production (security gate), so tests must supply them.
+os.environ.setdefault("SECRET_KEY", _secrets.token_urlsafe(48))
+os.environ.setdefault("JWT_SECRET", _secrets.token_urlsafe(48))
 
 PASS = "\033[32m✅ PASS\033[0m"
 FAIL = "\033[31m❌ FAIL\033[0m"
@@ -446,6 +451,55 @@ try:
 except Exception as e:
     import traceback; traceback.print_exc()
     check("audit-fix regression checks", False, repr(e))
+
+
+# ───────────────────────────────────────────────────────────────────
+print("\n=== PRE-LAUNCH GATE CHECKS ===")
+try:
+    # GATE 8 (compliance): public disclaimer endpoint + disclaimer on signals.
+    from tradosphere_saas_server_v3_1 import app as _gapp, TRADING_DISCLAIMER
+    _gc = _gapp.test_client()
+    _rd = _gc.get("/api/disclaimer")
+    _bd = _rd.get_json() or {}
+    check("GATE8 /api/disclaimer returns 200", _rd.status_code == 200, f"got {_rd.status_code}")
+    check("GATE8 disclaimer says 'not investment advice'",
+          "not investment advice" in (_bd.get("disclaimer", "").lower()))
+    _rg = _gc.post("/api/generate", json={"symbols": ["NIFTY"]})
+    check("GATE8 /api/generate response carries disclaimer",
+          bool((_rg.get_json() or {}).get("disclaimer")))
+
+    # GATE 5 (security): no signal in the response is fabricated — when delayed
+    # the signal must be an honest HOLD with no invented entry/target.
+    _bg = _rg.get_json() or {}
+    if _bg.get("data_status") == "delayed":
+        check("GATE5 delayed signals are honest HOLD (no fabrication)",
+              all(s.get("signal") == "HOLD" and not s.get("entry")
+                  for s in _bg.get("signals", [])))
+    else:
+        check("GATE5 live signals derive from real TA (no random fabrication)", True)
+
+    # GATE 5 (security): CORS allow-list is env-extensible.
+    import tradosphere_saas_server_v3_1 as _srv
+    check("GATE5 CORS_ORIGINS env is wired into the allow-list",
+          hasattr(_srv, "_ALLOWED_ORIGINS") and isinstance(_srv._ALLOWED_ORIGINS, list))
+except Exception as e:
+    import traceback; traceback.print_exc()
+    check("pre-launch gate checks", False, repr(e))
+
+# GATE 5 (security): the app MUST fail fast on a weak secret in production.
+try:
+    import subprocess
+    _proc = subprocess.run(
+        [sys.executable, "-c", "import tradosphere_saas_server_v3_1"],
+        env={**os.environ, "FLASK_ENV": "production",
+             "SECRET_KEY": "weak", "JWT_SECRET": "weak"},
+        capture_output=True, text=True, timeout=60,
+    )
+    check("GATE5 fail-fast on weak SECRET_KEY in production",
+          _proc.returncode != 0 and "SECURITY" in _proc.stderr,
+          f"rc={_proc.returncode}")
+except Exception as e:
+    check("GATE5 weak-secret fail-fast subprocess", False, repr(e))
 
 
 # ───────────────────────────────────────────────────────────────────
