@@ -1170,26 +1170,38 @@ def get_signals():
 
         def _build_signals():
             signals = []
+            broker_live = bool(market and market.is_authenticated())
             for symbol in symbols:
                 try:
-                    # Get current price and technical data
-                    if market and market.is_authenticated():
-                        price = market.get_ltp("NSE", symbol, "99926000" if symbol == "NIFTY" else "99926009")
-                    else:
-                        price = 24000  # Fallback
+                    # INTEGRITY: compute REAL EMA/RSI/MACD from live candles.
+                    # Never feed hardcoded/fabricated indicators into the signal
+                    # engine — emit an honest HOLD until real data is available.
+                    technical_data = None
+                    price = None
+                    if broker_live:
+                        candles = market.get_historical_candles(symbol, "15", 250)
+                        technical_data = _quick_technical_data(candles) if candles else None
 
-                    # Get technical indicators
-                    technical_data = {
-                        "ema_20": price * 0.995,
-                        "ema_50": price * 0.99,
-                        "ema_200": price * 0.98,
-                        "rsi": 55,
-                        "macd": 10.5,
-                        "macd_signal": 8.2
-                    }
+                        exch, token = _QUICK_SIGNAL_TOKENS.get(symbol, ("NSE", ""))
+                        if token:
+                            try:
+                                price = market.get_ltp(exch, symbol, token)
+                            except Exception:
+                                price = None
+                        if not price and candles:
+                            price = candles[-1].get("close")
 
-                    # Generate real signal
-                    signal = RealSignalGenerator.generate_signal(symbol, price, technical_data, ai_confidence=70)
+                    if not technical_data or not price:
+                        signals.append({
+                            "symbol": symbol,
+                            "signal": "HOLD",
+                            "reason": "Awaiting sufficient market data",
+                            "timestamp": datetime.utcnow().isoformat()
+                        })
+                        continue
+
+                    # Generate real signal from real indicators
+                    signal = RealSignalGenerator.generate_signal(symbol, float(price), technical_data, ai_confidence=70)
                     signals.append(signal)
 
                 except Exception as e:
@@ -1884,140 +1896,158 @@ def get_dashboard_overview():
 
 
 # ===== QUICK SIGNAL GENERATION (No Auth Required) =====
+
+# Symbol -> (exchange, token) used for live LTP lookups on the quick endpoint.
+_QUICK_SIGNAL_TOKENS = {
+    "NIFTY": ("NSE", "99926000"),
+    "BANKNIFTY": ("NSE", "99926009"),
+    "FINNIFTY": ("NSE", "99926037"),
+}
+
+
+def _quick_technical_data(candles):
+    """Compute REAL EMA/RSI/MACD from live candles for RealSignalGenerator.
+
+    Returns None when there isn't enough history to compute the core
+    indicators. We deliberately never fabricate values — callers fall back to
+    a HOLD signal instead of inventing a setup.
+    """
+    closes = [c.get("close", 0) for c in candles if c.get("close")]
+    if len(closes) < 26:  # MACD needs 26 candles; below this nothing is reliable
+        return None
+
+    ema_20 = TechnicalEngine.calculate_ema(closes, 20)
+    ema_50 = TechnicalEngine.calculate_ema(closes, 50)
+    ema_200 = TechnicalEngine.calculate_ema(closes, 200)
+    rsi = TechnicalEngine.calculate_rsi(closes, 14)
+    macd_data = TechnicalEngine.calculate_macd(closes, 12, 26, 9) or {}
+
+    # Core indicators must be real; if any is missing, don't emit a signal.
+    if ema_20 is None or ema_50 is None or rsi is None:
+        return None
+
+    return {
+        "ema_20": ema_20,
+        "ema_50": ema_50,
+        # ema_200 needs >=200 candles; degrade to ema_50 (NOT a random value)
+        # so the trend filter still works on shorter history.
+        "ema_200": ema_200 if ema_200 is not None else ema_50,
+        "rsi": rsi,
+        "macd": macd_data.get("macd", 0),
+        "macd_signal": macd_data.get("signal_line", 0),
+    }
+
+
+def _quick_hold_signal(symbol, reason):
+    """Honest placeholder when real market data isn't available (no fabrication)."""
+    return {
+        "symbol": symbol,
+        "direction": "HOLD",
+        "signal": "HOLD",
+        "entry": None,
+        "target": None,
+        "stoploss": None,
+        "confidence": 0,
+        "reason": reason,
+        "current_price": None,
+        "risk_reward": 0,
+        "timestamp": datetime.utcnow().isoformat() + 'Z',
+        "_live": False,
+    }
+
+
+def _quick_signal_for_symbol(symbol, broker_live):
+    """Build one quick signal from REAL technicals, or a HOLD if unavailable."""
+    if not broker_live:
+        return _quick_hold_signal(symbol, "Awaiting live market data")
+
+    try:
+        candles = market.get_historical_candles(symbol, "15", 250)
+        technical_data = _quick_technical_data(candles) if candles else None
+        if not technical_data:
+            return _quick_hold_signal(symbol, "Awaiting sufficient market data")
+
+        # Live price: prefer broker LTP, fall back to the latest candle close.
+        exch, token = _QUICK_SIGNAL_TOKENS.get(symbol, ("NSE", ""))
+        price = None
+        if token:
+            try:
+                price = market.get_ltp(exch, symbol, token)
+            except Exception:
+                price = None
+        if not price:
+            price = candles[-1].get("close")
+
+        sig = RealSignalGenerator.generate_signal(
+            symbol, float(price), technical_data, ai_confidence=70
+        )
+
+        entry = sig.get("entry_price")
+        target = sig.get("target")
+        stoploss = sig.get("stop_loss")
+        used = sig.get("signals_used") or []
+        risk_reward = (
+            round(abs(target - entry) / abs(entry - stoploss), 2)
+            if entry is not None and stoploss is not None and entry != stoploss
+            else 0
+        )
+        return {
+            "symbol": symbol,
+            "direction": sig.get("signal", "HOLD"),
+            "signal": sig.get("signal", "HOLD"),
+            "entry": entry,
+            "target": target,
+            "stoploss": stoploss,
+            "confidence": sig.get("confidence", 0),
+            "current_price": sig.get("current_price"),
+            "rsi": sig.get("rsi"),
+            "rsi_status": sig.get("rsi_status"),
+            "reason": ("Technical confluence: " + ", ".join(used)) if used else "Technical analysis",
+            "risk_reward": risk_reward,
+            "timestamp": sig.get("timestamp"),
+            "_live": True,
+        }
+    except Exception as e:
+        logger.warning(f"Quick signal generation failed for {symbol}: {e}")
+        return _quick_hold_signal(symbol, "Awaiting sufficient market data")
+
+
 @app.route('/api/generate', methods=['POST'])
 def generate_quick_signals():
     """
-    Generate trading signals with REAL LIVE market prices from Angel One
-    Falls back to mock data if broker connection unavailable
-    Returns proper signal format with entry, target, stoploss, confidence
+    Generate trading signals from REAL technical analysis of live Angel One
+    candle data (EMA / RSI / MACD via TechnicalEngine -> RealSignalGenerator).
+
+    INTEGRITY: this endpoint never fabricates signals. If the broker is not
+    connected, or there isn't enough candle history to compute the indicators,
+    it returns a HOLD with data_status "delayed" instead of inventing a setup.
     """
     try:
-        # Get request data
         data = request.get_json() or {}
-        symbols = data.get('symbols', ['NIFTY', 'BANKNIFTY', 'FINNIFTY'])
+        requested = data.get('symbols', ['NIFTY', 'BANKNIFTY', 'FINNIFTY'])
 
-        # Validate symbols
         valid_symbols = ['NIFTY', 'BANKNIFTY', 'FINNIFTY']
-        symbols = [s for s in symbols if s in valid_symbols]
+        symbols = [s for s in (requested or []) if s in valid_symbols]
         if not symbols:
             symbols = ['NIFTY', 'BANKNIFTY', 'FINNIFTY']
 
-        # Get REAL live market prices from Angel One
-        market_prices = {}
-        price_source = "live"
-
-        logger.info(f"🔍 DEBUG: market is None? {market is None}")
-        logger.info(f"🔍 DEBUG: market type: {type(market)}")
-        if market:
-            logger.info(f"🔍 DEBUG: market.is_authenticated()? {market.is_authenticated()}")
-
-        if market and market.is_authenticated():
-            try:
-                # Try to get real prices from Angel One API
-                nifty_data = market.get_nifty_price()
-                if nifty_data:
-                    market_prices['NIFTY'] = nifty_data.get('ltp', 24047.50)
-
-                banknifty_data = market.get_banknifty_price()
-                if banknifty_data:
-                    market_prices['BANKNIFTY'] = banknifty_data.get('ltp', 57489.75)
-
-                finnifty_data = market.get_finnifty_price()
-                if finnifty_data:
-                    market_prices['FINNIFTY'] = finnifty_data.get('ltp', 18950.00)
-
-                # If we got at least some real prices, use them
-                if market_prices:
-                    price_source = "live_angel_one"
-                    logger.info(f"✅ Using REAL live prices from Angel One: {market_prices}")
-                else:
-                    # Fall back to defaults if API didn't return prices
-                    market_prices = {
-                        'NIFTY': 24047.50,
-                        'BANKNIFTY': 57489.75,
-                        'FINNIFTY': 18950.00
-                    }
-                    price_source = "fallback"
-            except Exception as e:
-                logger.info(f"⚠️  Could not get real prices from Angel One: {e}")
-                # Fall back to mock data
-                market_prices = {
-                    'NIFTY': 24047.50,
-                    'BANKNIFTY': 57489.75,
-                    'FINNIFTY': 18950.00
-                }
-                price_source = "fallback"
-        else:
-            # Broker not connected, use fallback prices
-            market_prices = {
-                'NIFTY': 24047.50,
-                'BANKNIFTY': 57489.75,
-                'FINNIFTY': 18950.00
-            }
-            price_source = "fallback"
+        broker_live = bool(market and market.is_authenticated())
 
         signals = []
-
+        any_live = False
         for symbol in symbols:
-            current_price = market_prices.get(symbol, 20000)
+            sig = _quick_signal_for_symbol(symbol, broker_live)
+            if sig.pop("_live", False):
+                any_live = True
+            signals.append(sig)
 
-            # Generate realistic signal based on technical analysis
-            # Simulate EMA, RSI, support/resistance analysis
-            import random
-            random.seed(hash(symbol + str(datetime.utcnow().date())))
-
-            # Determine direction based on simulated indicators
-            ema_fast = current_price * (1 + random.uniform(-0.005, 0.015))
-            ema_slow = current_price * (1 + random.uniform(-0.01, 0.01))
-
-            is_bullish = ema_fast > ema_slow
-            rsi_value = random.uniform(35, 75) if is_bullish else random.uniform(25, 65)
-
-            # Determine signal direction
-            direction = 'BUY' if (is_bullish and rsi_value > 50) else 'SELL'
-
-            # Calculate entry, target, stop loss based on current price
-            if direction == 'BUY':
-                entry = current_price
-                target = current_price + random.uniform(300, 500)
-                stoploss = current_price - random.uniform(200, 350)
-                confidence = random.randint(65, 85)
-                reason = "EMA crossover with strong momentum"
-            else:
-                entry = current_price
-                target = current_price - random.uniform(250, 400)
-                stoploss = current_price + random.uniform(250, 450)
-                confidence = random.randint(60, 78)
-                reason = "Bearish divergence confirmed"
-
-            # Format entry, target, stoploss to 2 decimal places
-            entry = round(entry, 2)
-            target = round(target, 2)
-            stoploss = round(stoploss, 2)
-
-            signal = {
-                "symbol": symbol,
-                "direction": direction,
-                "entry": entry,
-                "target": target,
-                "stoploss": stoploss,
-                "confidence": confidence,
-                "timestamp": datetime.utcnow().isoformat() + 'Z',
-                "reason": reason,
-                "current_price": current_price,
-                "risk_reward": round(abs(target - entry) / abs(entry - stoploss), 2) if entry != stoploss else 0
-            }
-
-            signals.append(signal)
-
-        # Sanitize internal price_source into a clean, user-facing data status.
-        # We never expose internal "fallback"/"mock" wording to end users —
-        # ops still see the raw source in the server logs above.
-        public_data_status = "live" if price_source in ("live_angel_one", "live") else "delayed"
+        # User-facing status: 'live' only when at least one symbol used real
+        # broker data; otherwise 'delayed'. We never expose internal wording.
+        public_data_status = "live" if (broker_live and any_live) else "delayed"
 
         return jsonify({
             "status": "success",
-            "message": f"{len(signals)} signals generated successfully",
+            "message": f"{len(signals)} signals generated",
             "data_status": public_data_status,  # 'live' or 'delayed' (user-facing)
             "signals": signals,
             "timestamp": datetime.utcnow().isoformat() + 'Z'
