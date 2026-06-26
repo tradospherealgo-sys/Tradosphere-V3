@@ -2,6 +2,9 @@
 User Authentication Manager - JWT-based auth for SaaS
 Handles signup, login, password management, token generation
 """
+import logging
+logger = logging.getLogger(__name__)
+
 
 import os
 import jwt
@@ -45,7 +48,7 @@ class PasswordManager:
             new_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
             return new_hash.hex() == pwd_hash
         except Exception as e:
-            print(f"Password verification error: {e}")
+            logger.error(f"Password verification error: {e}")
             return False
 
 
@@ -231,29 +234,29 @@ class SessionManager:
 
 if __name__ == "__main__":
     # Test authentication
-    print("\n" + "="*70)
-    print("🔐 AUTHENTICATION MANAGER - TEST")
-    print("="*70)
+    logger.info("\n" + "="*70)
+    logger.info("🔐 AUTHENTICATION MANAGER - TEST")
+    logger.info("="*70)
 
     # Test password hashing
     pwd = "MySecurePassword123"
     hashed = PasswordManager.hash_password(pwd)
-    print(f"\n✅ Password hashed: {hashed[:50]}...")
-    print(f"✅ Password verified: {PasswordManager.verify_password(pwd, hashed)}")
-    print(f"❌ Wrong password: {PasswordManager.verify_password('WrongPassword', hashed)}")
+    logger.info(f"\n✅ Password hashed: {hashed[:50]}...")
+    logger.info(f"✅ Password verified: {PasswordManager.verify_password(pwd, hashed)}")
+    logger.error(f"❌ Wrong password: {PasswordManager.verify_password('WrongPassword', hashed)}")
 
     # Test JWT tokens
     tokens = JWTManager.generate_tokens(user_id=123, email="user@example.com")
-    print(f"\n✅ Access token generated")
-    print(f"✅ Token type: {tokens['token_type']}")
-    print(f"✅ Expires in: {tokens['expires_in']} seconds")
+    logger.info(f"\n✅ Access token generated")
+    logger.info(f"✅ Token type: {tokens['token_type']}")
+    logger.info(f"✅ Expires in: {tokens['expires_in']} seconds")
 
     # Verify token
     payload = JWTManager.verify_token(tokens["access_token"], token_type="access")
-    print(f"✅ Token verified: user_id={payload.get('user_id')}, email={payload.get('email')}")
+    logger.info(f"✅ Token verified: user_id={payload.get('user_id')}, email={payload.get('email')}")
 
     # Test email validation
-    print(f"\n✅ Valid email: {EmailValidator.is_valid_email('user@example.com')}")
-    print(f"❌ Invalid email: {EmailValidator.is_valid_email('invalid-email')}")
+    logger.info(f"\n✅ Valid email: {EmailValidator.is_valid_email('user@example.com')}")
+    logger.error(f"❌ Invalid email: {EmailValidator.is_valid_email('invalid-email')}")
 
-    print("\n" + "="*70)
+    logger.info("\n" + "="*70)

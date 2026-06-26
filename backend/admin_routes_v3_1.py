@@ -1,6 +1,9 @@
 """
 Admin Routes - User management, analytics, and admin controls
 """
+import logging
+logger = logging.getLogger(__name__)
+
 
 from flask import Blueprint, request, g
 from datetime import datetime, timedelta
@@ -330,4 +333,4 @@ def get_audit_log():
 
 
 if __name__ == "__main__":
-    print("✅ Admin routes module ready")
+    logger.info("✅ Admin routes module ready")

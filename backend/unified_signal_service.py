@@ -2,6 +2,9 @@
 Unified Signal Service - Single Source of Truth for Tradosphere
 Wraps System B (SignalGenerator) for consistent signal generation across dashboard and terminal
 """
+import logging
+logger = logging.getLogger(__name__)
+
 
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
@@ -158,7 +161,7 @@ class UnifiedSignalService:
             db.close()
 
         except Exception as e:
-            print(f"Warning: Could not save signal to database: {str(e)}")
+            logger.error(f"Warning: Could not save signal to database: {str(e)}")
 
     def _generate_consistency_marker(self, symbol: str, signal: Dict) -> str:
         """
@@ -224,7 +227,7 @@ class UnifiedSignalService:
             return [self._signal_to_dict(s) for s in signals]
 
         except Exception as e:
-            print(f"Error fetching signal history: {str(e)}")
+            logger.error(f"Error fetching signal history: {str(e)}")
             return []
 
     def get_signal_performance(self, symbol: str = None) -> Dict:
@@ -268,7 +271,7 @@ class UnifiedSignalService:
             }
 
         except Exception as e:
-            print(f"Error calculating performance: {str(e)}")
+            logger.error(f"Error calculating performance: {str(e)}")
             return {
                 'error': str(e),
                 'timestamp': datetime.utcnow().isoformat()

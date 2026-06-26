@@ -2,6 +2,9 @@
 Leads & Clients Tracking - CRM for managing signups and active users
 Track leads, conversions, and client lifecycle
 """
+import logging
+logger = logging.getLogger(__name__)
+
 
 from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Float, Text
@@ -261,6 +264,6 @@ def get_clients_stats(db):
 
 
 if __name__ == "__main__":
-    print("✅ Leads model module ready")
+    logger.info("✅ Leads model module ready")
     init_leads_db()
-    print("✅ Leads tables initialized")
+    logger.info("✅ Leads tables initialized")

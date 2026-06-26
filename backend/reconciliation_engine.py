@@ -4,6 +4,9 @@ Executes daily at 3:45 PM IST (post-market close)
 Validates AI signals against actual market candles
 Updates signal status to True Positive or False Positive
 """
+import logging
+logger = logging.getLogger(__name__)
+
 
 import pytz
 from datetime import datetime, time
@@ -57,7 +60,7 @@ class ReconciliationEngine:
 
             return False, None, None
         except Exception as e:
-            print(f"❌ Error checking target: {e}")
+            logger.error(f"❌ Error checking target: {e}")
             return False, None, None
 
 
@@ -86,7 +89,7 @@ class ReconciliationEngine:
 
             return False, None, None
         except Exception as e:
-            print(f"❌ Error checking SL: {e}")
+            logger.error(f"❌ Error checking SL: {e}")
             return False, None, None
 
 
@@ -190,7 +193,7 @@ class ReconciliationEngine:
             }
 
         except Exception as e:
-            print(f"❌ Error reconciling signal {signal.id}: {e}")
+            logger.error(f"❌ Error reconciling signal {signal.id}: {e}")
             return {
                 "signal_id": signal.id,
                 "status": "ERROR",
@@ -219,7 +222,7 @@ class ReconciliationEngine:
                 Signal.timestamp >= datetime.combine(today, datetime.min.time())
             ).all()
 
-            print(f"\n📊 RECONCILING {len(pending_signals)} pending signals...")
+            logger.info(f"\n📊 RECONCILING {len(pending_signals)} pending signals...")
 
             results = []
             true_positives = 0
@@ -244,7 +247,7 @@ class ReconciliationEngine:
                     else:
                         inconclusive += 1
 
-                print(f"   {signal.symbol}: {status} - {reconciliation.get('result')}")
+                logger.info(f"   {signal.symbol}: {status} - {reconciliation.get('result')}")
 
             # Calculate accuracy
             total_resolved = true_positives + false_positives
@@ -264,7 +267,7 @@ class ReconciliationEngine:
             }
 
         except Exception as e:
-            print(f"❌ Error in reconciliation batch: {e}")
+            logger.error(f"❌ Error in reconciliation batch: {e}")
             return {
                 "status": "error",
                 "message": str(e),
@@ -359,7 +362,7 @@ class ReconciliationEngine:
             }
 
         except Exception as e:
-            print(f"❌ Error generating insights: {e}")
+            logger.error(f"❌ Error generating insights: {e}")
             return {
                 "status": "error",
                 "message": str(e)
@@ -368,27 +371,27 @@ class ReconciliationEngine:
 
 if __name__ == "__main__":
     # Test reconciliation
-    print("\n" + "="*70)
-    print("📊 POST-MARKET RECONCILIATION ENGINE - TEST")
-    print("="*70)
+    logger.info("\n" + "="*70)
+    logger.info("📊 POST-MARKET RECONCILIATION ENGINE - TEST")
+    logger.info("="*70)
 
     # Check if it's time to reconcile
     if ReconciliationEngine.is_reconciliation_time():
-        print("✅ Current time is within reconciliation window (3:45 PM - 4:00 PM IST)")
+        logger.info("✅ Current time is within reconciliation window (3:45 PM - 4:00 PM IST)")
         result = ReconciliationEngine.reconcile_all_pending()
-        print(f"\n✅ Reconciliation Complete:")
-        print(f"   True Positives: {result.get('true_positives', 0)}")
-        print(f"   False Positives: {result.get('false_positives', 0)}")
-        print(f"   Accuracy Rate: {result.get('accuracy_rate', 0)}%")
+        logger.info(f"\n✅ Reconciliation Complete:")
+        logger.info(f"   True Positives: {result.get('true_positives', 0)}")
+        logger.info(f"   False Positives: {result.get('false_positives', 0)}")
+        logger.info(f"   Accuracy Rate: {result.get('accuracy_rate', 0)}%")
     else:
-        print("⏰ Not within reconciliation window")
-        print("   Reconciliation runs at 3:45 PM IST (post-market close)")
+        logger.info("⏰ Not within reconciliation window")
+        logger.info("   Reconciliation runs at 3:45 PM IST (post-market close)")
 
     # Generate insights
     insights = ReconciliationEngine.generate_reconciliation_insights()
-    print(f"\n📈 Reconciliation Insights:")
-    print(f"   Overall Accuracy: {insights.get('overall_accuracy', '--')}%")
-    print(f"   NIFTY: {insights.get('nifty_accuracy', '--')}%")
-    print(f"   BANKNIFTY: {insights.get('banknifty_accuracy', '--')}%")
+    logger.info(f"\n📈 Reconciliation Insights:")
+    logger.info(f"   Overall Accuracy: {insights.get('overall_accuracy', '--')}%")
+    logger.info(f"   NIFTY: {insights.get('nifty_accuracy', '--')}%")
+    logger.info(f"   BANKNIFTY: {insights.get('banknifty_accuracy', '--')}%")
 
-    print("\n" + "="*70)
+    logger.info("\n" + "="*70)

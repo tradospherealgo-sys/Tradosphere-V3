@@ -2,6 +2,9 @@
 User Model - SQLAlchemy ORM models for SaaS multi-tenancy
 Users, API Keys, Sessions, and user-specific data
 """
+import logging
+logger = logging.getLogger(__name__)
+
 
 from datetime import datetime
 from typing import Dict, List
@@ -172,7 +175,7 @@ class UserSession(Base):
 def init_user_db():
     """Initialize user database tables"""
     Base.metadata.create_all(bind=engine)
-    print("✅ User database tables created")
+    logger.info("✅ User database tables created")
 
 
 def get_user_db():
@@ -311,11 +314,11 @@ def get_user_sessions(db, user_id: int) -> List[UserSession]:
 
 if __name__ == "__main__":
     # Test models
-    print("\n" + "="*70)
-    print("👤 USER MODEL - TEST")
-    print("="*70)
+    logger.info("\n" + "="*70)
+    logger.info("👤 USER MODEL - TEST")
+    logger.info("="*70)
 
     init_user_db()
-    print("✅ User database initialized")
+    logger.info("✅ User database initialized")
 
-    print("\n" + "="*70)
+    logger.info("\n" + "="*70)

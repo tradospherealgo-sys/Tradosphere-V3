@@ -2,6 +2,9 @@
 Leads Routes - CRM and client management endpoints
 Track signups, conversions, and client metrics
 """
+import logging
+logger = logging.getLogger(__name__)
+
 
 from flask import Blueprint, request, jsonify, g
 from datetime import datetime
@@ -126,4 +129,4 @@ def convert_to_customer():
 
 
 if __name__ == "__main__":
-    print("✅ Leads routes module ready")
+    logger.info("✅ Leads routes module ready")

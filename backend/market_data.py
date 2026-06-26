@@ -70,50 +70,50 @@ class AngelOneMarketData:
         self.scheduler = None
         self.enable_auto_refresh = enable_auto_refresh
 
-        print("\n" + "="*70)
-        print("🚀 TRADOSPHERE - ANGEL ONE SmartAPI INTEGRATION")
-        print("="*70)
-        print(f"📍 Client Code: {self.client_code}")
-        print(f"📍 API Key: {self.api_key[:8]}...{self.api_key[-2:]}")
-        print(f"🔄 Auto-Refresh: {'ENABLED' if enable_auto_refresh else 'DISABLED'}")
+        logger.info("\n" + "="*70)
+        logger.info("🚀 TRADOSPHERE - ANGEL ONE SmartAPI INTEGRATION")
+        logger.info("="*70)
+        logger.info(f"📍 Client Code: {self.client_code}")
+        logger.info("📍 API Key: (loaded from env)")
+        logger.info(f"🔄 Auto-Refresh: {'ENABLED' if enable_auto_refresh else 'DISABLED'}")
 
         # Initialize and authenticate
         self._initialize()
 
         if self.is_authenticated():
-            print("\n✅ AUTHENTICATION SUCCESSFUL!")
-            print(f"📝 Account: {self.client_name}")
-            print(f"🔑 JWT Token: {self.jwt_token[:50]}...")
-            print(f"⏰ Token Created: {self.token_created_at}")
+            logger.info("\n✅ AUTHENTICATION SUCCESSFUL!")
+            logger.info(f"📝 Account: {self.client_name}")
+            logger.info("🔑 JWT Token: (obtained)")
+            logger.info(f"⏰ Token Created: {self.token_created_at}")
 
             # Start auto-refresh scheduler if enabled
             if enable_auto_refresh:
                 self._start_token_refresh_scheduler()
 
-            print("="*70 + "\n")
+            logger.info("="*70 + "\n")
         else:
-            print("\n❌ AUTHENTICATION FAILED!")
-            print("="*70 + "\n")
+            logger.error("\n❌ AUTHENTICATION FAILED!")
+            logger.info("="*70 + "\n")
             raise Exception("Failed to authenticate with Angel One API")
 
     def _initialize(self) -> bool:
         """Initialize SmartConnect and authenticate"""
         try:
-            print("\n🔐 Initializing SmartAPI SDK...\n")
+            logger.info("\n🔐 Initializing SmartAPI SDK...\n")
 
             # Create SmartConnect instance
             self.smart = SmartConnect(api_key=self.api_key)
-            print("   ✅ SmartConnect initialized")
+            logger.info("   ✅ SmartConnect initialized")
 
             # Generate TOTP
             totp_code = self._generate_totp()
-            print(f"   ✅ TOTP generated: {totp_code}")
+            logger.info("   ✅ TOTP generated")
 
             # Call generateSession
-            print(f"\n   📡 Calling generateSession()...")
-            print(f"      Client Code: {self.client_code}")
-            print(f"      PIN: {self.pin}")
-            print(f"      TOTP: {totp_code}")
+            logger.info(f"\n   📡 Calling generateSession()...")
+            logger.info(f"      Client Code: {self.client_code}")
+            logger.info("      PIN: ****")
+            logger.info("      TOTP: ****")
 
             response = self.smart.generateSession(
                 self.client_code,
@@ -123,15 +123,15 @@ class AngelOneMarketData:
 
             # Check response
             if not isinstance(response, dict):
-                print(f"   ❌ Invalid response type: {type(response)}")
+                logger.error(f"   ❌ Invalid response type: {type(response)}")
                 return False
 
             if not response.get("status"):
                 error_msg = response.get("message", "Unknown error")
                 error_code = response.get("errorcode", "")
-                print(f"   ❌ Authentication failed: {error_msg}")
+                logger.error(f"   ❌ Authentication failed: {error_msg}")
                 if error_code:
-                    print(f"      Error code: {error_code}")
+                    logger.error(f"      Error code: {error_code}")
                 return False
 
             # Extract tokens
@@ -142,20 +142,20 @@ class AngelOneMarketData:
             self.client_name = data.get("name", "Unknown")
 
             if not self.jwt_token:
-                print("   ❌ No JWT token received")
+                logger.error("   ❌ No JWT token received")
                 return False
 
             # Record token creation time
             self.token_created_at = datetime.now()
 
-            print(f"   ✅ Tokens received")
-            print(f"   ✅ Account: {self.client_name}")
+            logger.info(f"   ✅ Tokens received")
+            logger.info(f"   ✅ Account: {self.client_name}")
             logger.info(f"✅ Angel One authentication successful for {self.client_name}")
             return True
 
         except Exception as e:
             logger.error(f"Authentication error: {str(e)}")
-            print(f"   ❌ Error: {str(e)}")
+            logger.error(f"   ❌ Error: {str(e)}")
             return False
 
     def _generate_totp(self) -> str:
@@ -167,7 +167,7 @@ class AngelOneMarketData:
             return totp.now()
         except Exception as e:
             logger.warning(f"Failed to generate TOTP: {str(e)}")
-            print(f"   ⚠️  Warning: Failed to generate TOTP: {str(e)}")
+            logger.error(f"   ⚠️  Warning: Failed to generate TOTP: {str(e)}")
             return "000000"
 
     def _start_token_refresh_scheduler(self):
@@ -192,16 +192,15 @@ class AngelOneMarketData:
 
             self.scheduler.start()
             logger.info("✅ Token refresh scheduler started (every 4 hours)")
-            print("✅ Token refresh scheduler started (every 4 hours)")
         except Exception as e:
             logger.error(f"Failed to start token refresh scheduler: {str(e)}")
-            print(f"❌ Failed to start scheduler: {str(e)}")
+            logger.error(f"❌ Failed to start scheduler: {str(e)}")
 
     def _refresh_token(self):
         """Refresh Angel One JWT token"""
         try:
             logger.info("🔄 Starting token refresh...")
-            print(f"\n🔄 Token Refresh Triggered at {datetime.now()}")
+            logger.info(f"\n🔄 Token Refresh Triggered at {datetime.now()}")
 
             if not self.smart:
                 logger.warning("SmartConnect not initialized for token refresh")
@@ -214,7 +213,7 @@ class AngelOneMarketData:
             logger.info(f"Generated new TOTP for refresh")
 
             # Call generateSession again to get new tokens
-            print(f"   📡 Calling generateSession() for token refresh...")
+            logger.info(f"   📡 Calling generateSession() for token refresh...")
             response = self.smart.generateSession(
                 self.client_code,
                 self.pin,
@@ -224,7 +223,7 @@ class AngelOneMarketData:
             if not isinstance(response, dict) or not response.get("status"):
                 error_msg = response.get("message") if isinstance(response, dict) else "Unknown error"
                 logger.error(f"Token refresh failed: {error_msg}")
-                print(f"   ❌ Token refresh failed: {error_msg}")
+                logger.error(f"   ❌ Token refresh failed: {error_msg}")
                 return False
 
             # Extract new tokens
@@ -238,14 +237,14 @@ class AngelOneMarketData:
             self.token_refreshed_count += 1
 
             logger.info(f"✅ Token refresh successful (Refresh #{self.token_refreshed_count})")
-            print(f"   ✅ Token refreshed successfully!")
-            print(f"   📊 Total refreshes: {self.token_refreshed_count}")
-            print(f"   ⏰ New token created at: {self.token_created_at}")
+            logger.info(f"   ✅ Token refreshed successfully!")
+            logger.info(f"   📊 Total refreshes: {self.token_refreshed_count}")
+            logger.info(f"   ⏰ New token created at: {self.token_created_at}")
             return True
 
         except Exception as e:
             logger.error(f"Token refresh error: {str(e)}")
-            print(f"   ❌ Token refresh error: {str(e)}")
+            logger.error(f"   ❌ Token refresh error: {str(e)}")
             return False
 
     def get_token_status(self) -> Dict:
@@ -329,7 +328,7 @@ class AngelOneMarketData:
             }
 
         except Exception as e:
-            print(f"❌ Error getting NIFTY price: {str(e)}")
+            logger.error(f"❌ Error getting NIFTY price: {str(e)}")
             return None
 
     def get_banknifty_price(self) -> Optional[Dict]:
@@ -355,7 +354,7 @@ class AngelOneMarketData:
             }
 
         except Exception as e:
-            print(f"❌ Error getting BANKNIFTY price: {str(e)}")
+            logger.error(f"❌ Error getting BANKNIFTY price: {str(e)}")
             return None
 
     def get_finnifty_price(self) -> Optional[Dict]:
@@ -381,7 +380,7 @@ class AngelOneMarketData:
             }
 
         except Exception as e:
-            print(f"❌ Error getting FINNIFTY price: {str(e)}")
+            logger.error(f"❌ Error getting FINNIFTY price: {str(e)}")
             return None
 
     def get_status(self) -> Dict:
@@ -410,7 +409,7 @@ class AngelOneMarketData:
         """
         try:
             if not self.is_authenticated():
-                print(f"❌ Not authenticated, cannot fetch historical candles for {symbol}")
+                logger.error(f"❌ Not authenticated, cannot fetch historical candles for {symbol}")
                 return None
 
             from database import get_db, MarketSnapshot
@@ -434,7 +433,7 @@ class AngelOneMarketData:
                 ).order_by(MarketSnapshot.timestamp).all()
 
                 if not snapshots or len(snapshots) < 2:
-                    print(f"⚠️  Insufficient snapshots for {symbol} {timeframe} - using mock data for testing")
+                    logger.warning(f"⚠️  Insufficient snapshots for {symbol} {timeframe} - using mock data for testing")
                     # Generate mock candles for testing - with realistic values
                     return self._generate_test_candles(symbol, timeframe, limit)
 
@@ -442,9 +441,9 @@ class AngelOneMarketData:
                 candles = self._build_candles_from_snapshots(snapshots, timeframe)
 
                 if candles:
-                    print(f"✅ Generated {len(candles)} candles for {symbol} from {timeframe} snapshots")
+                    logger.info(f"✅ Generated {len(candles)} candles for {symbol} from {timeframe} snapshots")
                 else:
-                    print(f"⚠️  Could not generate candles for {symbol}, using mock data")
+                    logger.error(f"⚠️  Could not generate candles for {symbol}, using mock data")
                     return self._generate_test_candles(symbol, timeframe, limit)
 
                 return candles
@@ -453,7 +452,7 @@ class AngelOneMarketData:
                 db.close()
 
         except Exception as e:
-            print(f"❌ Error fetching historical candles: {str(e)}")
+            logger.error(f"❌ Error fetching historical candles: {str(e)}")
             # Fallback to test candles
             return self._generate_test_candles(symbol, timeframe, limit)
 
@@ -500,7 +499,7 @@ class AngelOneMarketData:
 
             current_price = close_price
 
-        print(f"✅ Generated {len(candles)} test candles for {symbol} {timeframe}")
+        logger.info(f"✅ Generated {len(candles)} test candles for {symbol} {timeframe}")
         return candles
 
     def _build_candles_from_snapshots(self, snapshots, timeframe: str) -> list:
@@ -626,14 +625,14 @@ class AngelOneMarketData:
                     if result:
                         saved_count += 1
                 except Exception as e:
-                    print(f"   ⚠️  Failed to save candle: {str(e)}")
+                    logger.error(f"   ⚠️  Failed to save candle: {str(e)}")
                     continue
 
-            print(f"✅ Saved {saved_count}/{len(candles)} candles for {symbol}")
+            logger.info(f"✅ Saved {saved_count}/{len(candles)} candles for {symbol}")
             return saved_count > 0
 
         except Exception as e:
-            print(f"❌ Error saving candles: {str(e)}")
+            logger.error(f"❌ Error saving candles: {str(e)}")
             return False
 
     def get_option_chain(self, symbol: str, expiry: str = None) -> Optional[Dict]:
@@ -649,10 +648,10 @@ class AngelOneMarketData:
         """
         try:
             if not self.is_authenticated():
-                print(f"❌ Not authenticated, cannot fetch option chain for {symbol}")
+                logger.error(f"❌ Not authenticated, cannot fetch option chain for {symbol}")
                 return None
 
-            print(f"📊 Fetching option chain for {symbol}...")
+            logger.info(f"📊 Fetching option chain for {symbol}...")
 
             # Get the current price
             if symbol == "NIFTY":
@@ -662,31 +661,31 @@ class AngelOneMarketData:
             elif symbol == "FINNIFTY":
                 price_data = self.get_finnifty_price()
             else:
-                print(f"❌ Unknown symbol: {symbol}")
+                logger.error(f"❌ Unknown symbol: {symbol}")
                 return None
 
             if not price_data:
-                print(f"❌ Could not get current price for {symbol}")
+                logger.error(f"❌ Could not get current price for {symbol}")
                 return None
 
             spot_price = price_data.get("ltp", 0)
 
             # Try to fetch real option chain from Angel One SmartAPI first
-            print(f"   📡 Attempting to fetch real option chain from Angel One API...")
+            logger.info(f"   📡 Attempting to fetch real option chain from Angel One API...")
             real_option_chain = self._fetch_real_option_chain_from_api(symbol, expiry or "current")
 
             if real_option_chain and real_option_chain.get("status") == "success":
-                print(f"   ✅ Real option chain fetched from Angel One API")
+                logger.info(f"   ✅ Real option chain fetched from Angel One API")
                 return real_option_chain
 
             # Fallback to synthetic generation if API fails
-            print(f"   ⚠️  Angel One API failed or returned no data, using smart fallback generation")
+            logger.error(f"   ⚠️  Angel One API failed or returned no data, using smart fallback generation")
             option_chain = self._generate_option_chain(symbol, spot_price, expiry or "current")
 
             return option_chain
 
         except Exception as e:
-            print(f"❌ Error fetching option chain: {str(e)}")
+            logger.error(f"❌ Error fetching option chain: {str(e)}")
             import traceback
             traceback.print_exc()
             return None
@@ -743,11 +742,11 @@ class AngelOneMarketData:
 
             except AttributeError:
                 # SmartConnect doesn't have optionChain() method, try alternative
-                print(f"   ⚠️  optionChain() method not available in SmartAPI SDK")
+                logger.warning(f"   ⚠️  optionChain() method not available in SmartAPI SDK")
                 return None
 
         except Exception as e:
-            print(f"   ⚠️  Error fetching real option chain: {str(e)}")
+            logger.error(f"   ⚠️  Error fetching real option chain: {str(e)}")
             return None
 
     def _parse_real_option_chain(self, api_response: Dict, symbol: str, spot_price: float, expiry: str) -> Optional[Dict]:
@@ -836,11 +835,11 @@ class AngelOneMarketData:
                 "timestamp": datetime.utcnow().isoformat()
             }
 
-            print(f"   ✅ Parsed {len(strikes_dict)} strikes from Angel One API")
+            logger.info(f"   ✅ Parsed {len(strikes_dict)} strikes from Angel One API")
             return option_chain
 
         except Exception as e:
-            print(f"   ⚠️  Error parsing option chain: {str(e)}")
+            logger.error(f"   ⚠️  Error parsing option chain: {str(e)}")
             return None
 
     def _generate_option_chain(self, symbol: str, spot_price: float, expiry: str) -> Dict:
@@ -951,7 +950,7 @@ class AngelOneMarketData:
                 )
                 option_chain["with_greeks"] = True
         except Exception as e:
-            print(f"⚠️  Greeks injection skipped: {e}")
+            logger.warning(f"⚠️  Greeks injection skipped: {e}")
             option_chain["with_greeks"] = False
 
         return option_chain
@@ -991,12 +990,12 @@ class AngelOneMarketData:
             )
 
             if result:
-                print(f"✅ Saved option chain for {symbol} expiry {expiry}")
-                print(f"   CE OI: {total_ce_oi:,} | PE OI: {total_pe_oi:,} | PCR: {pcr:.3f}")
+                logger.info(f"✅ Saved option chain for {symbol} expiry {expiry}")
+                logger.info(f"   CE OI: {total_ce_oi:,} | PE OI: {total_pe_oi:,} | PCR: {pcr:.3f}")
                 return True
 
             return False
 
         except Exception as e:
-            print(f"❌ Error saving option chain: {str(e)}")
+            logger.error(f"❌ Error saving option chain: {str(e)}")
             return False

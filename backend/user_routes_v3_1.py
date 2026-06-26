@@ -1,6 +1,9 @@
 """
 User Routes - Profile, Settings, API Key Management
 """
+import logging
+logger = logging.getLogger(__name__)
+
 
 from flask import Blueprint, request, g
 from user_model_v3_1 import (
@@ -311,4 +314,4 @@ def get_activity():
 
 
 if __name__ == "__main__":
-    print("✅ User routes module ready")
+    logger.info("✅ User routes module ready")

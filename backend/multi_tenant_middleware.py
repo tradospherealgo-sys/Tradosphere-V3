@@ -2,6 +2,9 @@
 Multi-Tenant Middleware - Enforce user data isolation
 Filters all queries by user_id to ensure data privacy
 """
+import logging
+logger = logging.getLogger(__name__)
+
 
 from flask import request, g, jsonify
 from functools import wraps
@@ -201,4 +204,4 @@ def get_user_signals():
 
 
 if __name__ == "__main__":
-    print("✅ Multi-tenant middleware module ready")
+    logger.info("✅ Multi-tenant middleware module ready")

@@ -1,6 +1,9 @@
 """
 Database Module - SQLAlchemy ORM models
 """
+import logging
+logger = logging.getLogger(__name__)
+
 
 import os
 from datetime import datetime
@@ -191,7 +194,7 @@ class OptionChain(Base):
 def init_db():
     """Initialize database"""
     Base.metadata.create_all(bind=engine)
-    print("✅ Database initialized")
+    logger.info("✅ Database initialized")
 
 def get_db() -> Session:
     """Get database session"""
@@ -522,10 +525,10 @@ def create_paper_trade(symbol: str, direction: str, entry_price: float, target_p
         db.add(trade)
         db.commit()
         db.refresh(trade)
-        print(f"✅ Paper trade created (ID: {trade.id}) - Awaiting approval")
+        logger.info(f"✅ Paper trade created (ID: {trade.id}) - Awaiting approval")
         return trade.to_dict()
     except Exception as e:
-        print(f"❌ Error creating paper trade: {str(e)}")
+        logger.error(f"❌ Error creating paper trade: {str(e)}")
         return None
     finally:
         db.close()
@@ -536,11 +539,11 @@ def approve_paper_trade(trade_id: int, reason: str = None) -> Dict:
     try:
         trade = db.query(PaperTrade).filter(PaperTrade.id == trade_id).first()
         if not trade:
-            print(f"❌ Trade {trade_id} not found")
+            logger.error(f"❌ Trade {trade_id} not found")
             return None
 
         if trade.status != "PENDING_APPROVAL":
-            print(f"❌ Trade {trade_id} is not pending approval (current status: {trade.status})")
+            logger.error(f"❌ Trade {trade_id} is not pending approval (current status: {trade.status})")
             return None
 
         trade.status = "OPEN"
@@ -548,10 +551,10 @@ def approve_paper_trade(trade_id: int, reason: str = None) -> Dict:
         trade.approval_reason = reason or "User approved"
         db.commit()
         db.refresh(trade)
-        print(f"✅ Paper trade {trade_id} approved - Status changed to OPEN")
+        logger.info(f"✅ Paper trade {trade_id} approved - Status changed to OPEN")
         return trade.to_dict()
     except Exception as e:
-        print(f"❌ Error approving trade: {str(e)}")
+        logger.error(f"❌ Error approving trade: {str(e)}")
         return None
     finally:
         db.close()
@@ -562,21 +565,21 @@ def reject_paper_trade(trade_id: int, reason: str = None) -> Dict:
     try:
         trade = db.query(PaperTrade).filter(PaperTrade.id == trade_id).first()
         if not trade:
-            print(f"❌ Trade {trade_id} not found")
+            logger.error(f"❌ Trade {trade_id} not found")
             return None
 
         if trade.status != "PENDING_APPROVAL":
-            print(f"❌ Trade {trade_id} is not pending approval (current status: {trade.status})")
+            logger.error(f"❌ Trade {trade_id} is not pending approval (current status: {trade.status})")
             return None
 
         trade.status = "REJECTED"
         trade.approval_reason = reason or "User rejected"
         db.commit()
         db.refresh(trade)
-        print(f"✅ Paper trade {trade_id} rejected")
+        logger.info(f"✅ Paper trade {trade_id} rejected")
         return trade.to_dict()
     except Exception as e:
-        print(f"❌ Error rejecting trade: {str(e)}")
+        logger.error(f"❌ Error rejecting trade: {str(e)}")
         return None
     finally:
         db.close()
@@ -587,11 +590,11 @@ def close_paper_trade(trade_id: int, exit_price: float) -> Dict:
     try:
         trade = db.query(PaperTrade).filter(PaperTrade.id == trade_id).first()
         if not trade:
-            print(f"❌ Trade {trade_id} not found")
+            logger.error(f"❌ Trade {trade_id} not found")
             return None
 
         if trade.status != "OPEN":
-            print(f"❌ Trade {trade_id} is not open (current status: {trade.status})")
+            logger.error(f"❌ Trade {trade_id} is not open (current status: {trade.status})")
             return None
 
         # Calculate P&L
@@ -610,10 +613,10 @@ def close_paper_trade(trade_id: int, exit_price: float) -> Dict:
         trade.closed_at = datetime.utcnow()
         db.commit()
         db.refresh(trade)
-        print(f"✅ Paper trade {trade_id} closed - P&L: {trade.pnl} ({trade.pnl_percent}%)")
+        logger.info(f"✅ Paper trade {trade_id} closed - P&L: {trade.pnl} ({trade.pnl_percent}%)")
         return trade.to_dict()
     except Exception as e:
-        print(f"❌ Error closing trade: {str(e)}")
+        logger.error(f"❌ Error closing trade: {str(e)}")
         return None
     finally:
         db.close()

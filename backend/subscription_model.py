@@ -1,6 +1,9 @@
 """
 Subscription Management - SaaS billing tiers and subscription tracking
 """
+import logging
+logger = logging.getLogger(__name__)
+
 
 from datetime import datetime, timedelta
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text
@@ -292,6 +295,6 @@ def get_user_invoices(db, user_id: int, limit: int = 20):
 
 
 if __name__ == "__main__":
-    print("✅ Subscription model module ready")
+    logger.info("✅ Subscription model module ready")
     init_subscription_db()
-    print("✅ Subscription tables initialized")
+    logger.info("✅ Subscription tables initialized")

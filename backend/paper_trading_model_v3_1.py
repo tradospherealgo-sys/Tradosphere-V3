@@ -2,6 +2,9 @@
 Paper Trading System - Virtual trading for testing signals and strategies
 Track trades, P&L, accuracy, and performance metrics
 """
+import logging
+logger = logging.getLogger(__name__)
+
 
 from datetime import datetime, timedelta
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey
@@ -333,6 +336,6 @@ def close_signal(db, signal_id: int, outcome_price: float):
 
 
 if __name__ == "__main__":
-    print("✅ Paper trading model module ready")
+    logger.info("✅ Paper trading model module ready")
     init_paper_trading_db()
-    print("✅ Paper trading tables initialized")
+    logger.info("✅ Paper trading tables initialized")

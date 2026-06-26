@@ -2,6 +2,9 @@
 Signals Engine - Generate actionable trade signals
 Analyzes technical indicators, options data, and market conditions
 """
+import logging
+logger = logging.getLogger(__name__)
+
 
 from typing import Dict, List, Optional
 from datetime import datetime
@@ -222,7 +225,7 @@ class SignalsEngine:
             return signals[:3]
 
         except Exception as e:
-            print(f"Error generating signals: {str(e)}")
+            logger.error(f"Error generating signals: {str(e)}")
             import traceback
             traceback.print_exc()
             return []

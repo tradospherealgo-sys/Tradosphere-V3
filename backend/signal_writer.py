@@ -2,6 +2,9 @@
 Signal Intelligence Engine - Professional trading signal generation
 Integrates technical, options, and AI analysis for comprehensive market signals
 """
+import logging
+logger = logging.getLogger(__name__)
+
 
 from datetime import datetime
 from typing import Dict, Optional, List
@@ -175,7 +178,7 @@ class SignalGenerator:
             # Get technical analysis
             candles = get_candles(symbol, interval="15", limit=100)
             if not candles or len(candles) < 14:
-                print(f"⚠️  Insufficient candle data for {symbol}, skipping signal")
+                logger.warning(f"⚠️  Insufficient candle data for {symbol}, skipping signal")
                 return None
 
             technical_data = TechnicalEngine.analyze(candles)
@@ -183,7 +186,7 @@ class SignalGenerator:
             # Get options analysis
             option_chain = get_latest_option_chain(symbol)
             if not option_chain:
-                print(f"⚠️  No option chain data for {symbol}, skipping signal")
+                logger.warning(f"⚠️  No option chain data for {symbol}, skipping signal")
                 return None
 
             # Fetch fresh option chain with all data
@@ -203,7 +206,7 @@ class SignalGenerator:
             )
 
         except Exception as e:
-            print(f"❌ Error analyzing {symbol}: {str(e)}")
+            logger.error(f"❌ Error analyzing {symbol}: {str(e)}")
             import traceback
             traceback.print_exc()
             return None
@@ -409,35 +412,35 @@ class SignalGenerator:
             return signal_dict
 
         except Exception as e:
-            print(f"❌ Error generating signal: {str(e)}")
+            logger.error(f"❌ Error generating signal: {str(e)}")
             import traceback
             traceback.print_exc()
             return None
 
     def _print_signal(self, signal: Dict):
         """Print formatted signal output"""
-        print(f"\n{'='*70}")
-        print(f"🎯 TRADOSPHERE SIGNAL")
-        print(f"{'='*70}")
-        print(f"Instrument: {signal['instrument']}")
-        print(f"Market Bias: {signal['market_bias']} | Direction: {signal['direction']}")
-        print(f"Setup: {signal['setup']}")
-        print(f"Entry Zone: {signal['entry_zone']}")
-        print(f"Target: {signal['target']} | Stop Loss: {signal['stop_loss']}")
-        print(f"Confidence: {signal['confidence']}% | Risk Level: {signal['risk_level']}")
-        print(f"Quality Score: {signal['quality_score']['overall']}")
-        print(f"Reasons:")
+        logger.info(f"\n{'='*70}")
+        logger.info(f"🎯 TRADOSPHERE SIGNAL")
+        logger.info(f"{'='*70}")
+        logger.info(f"Instrument: {signal['instrument']}")
+        logger.info(f"Market Bias: {signal['market_bias']} | Direction: {signal['direction']}")
+        logger.info(f"Setup: {signal['setup']}")
+        logger.info(f"Entry Zone: {signal['entry_zone']}")
+        logger.info(f"Target: {signal['target']} | Stop Loss: {signal['stop_loss']}")
+        logger.info(f"Confidence: {signal['confidence']}% | Risk Level: {signal['risk_level']}")
+        logger.info(f"Quality Score: {signal['quality_score']['overall']}")
+        logger.info(f"Reasons:")
         for reason in signal['reasons']:
-            print(f"  {reason}")
-        print(f"{'='*70}")
+            logger.info(f"  {reason}")
+        logger.info(f"{'='*70}")
 
     def generate_signals(self) -> Dict:
         """Generate comprehensive signals for all symbols"""
         signals = []
 
-        print("\n" + "="*70)
-        print("🎯 SIGNAL INTELLIGENCE ENGINE")
-        print("="*70)
+        logger.info("\n" + "="*70)
+        logger.info("🎯 SIGNAL INTELLIGENCE ENGINE")
+        logger.info("="*70)
 
         # Get current prices
         nifty_price = None
@@ -458,7 +461,7 @@ class SignalGenerator:
             if nifty_signal:
                 signals.append(nifty_signal)
         else:
-            print("⚠️  NIFTY price not available")
+            logger.warning("⚠️  NIFTY price not available")
 
         # Generate BANKNIFTY signal
         if banknifty_price:
@@ -466,11 +469,11 @@ class SignalGenerator:
             if bnf_signal:
                 signals.append(bnf_signal)
         else:
-            print("⚠️  BANKNIFTY price not available")
+            logger.warning("⚠️  BANKNIFTY price not available")
 
         metrics = get_metrics()
 
-        print("\n" + "="*70)
+        logger.info("\n" + "="*70)
         return {
             "status": "success" if signals else "no_signals",
             "count": len(signals),
@@ -485,14 +488,14 @@ def generate_on_demand() -> Dict:
     try:
         from market_data import AngelOneMarketData
 
-        print("\n🚀 Initializing market data...")
+        logger.info("\n🚀 Initializing market data...")
         market = AngelOneMarketData()
 
         generator = SignalGenerator(market)
         result = generator.generate_signals()
         return result
     except Exception as e:
-        print(f"❌ Signal generation error: {str(e)}")
+        logger.error(f"❌ Signal generation error: {str(e)}")
         return {
             "status": "error",
             "message": str(e),

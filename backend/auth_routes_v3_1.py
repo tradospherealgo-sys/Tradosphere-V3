@@ -1,6 +1,9 @@
 """
 Authentication Routes - Google OAuth, Signup, Login, Logout, Token Refresh
 """
+import logging
+logger = logging.getLogger(__name__)
+
 
 from flask import Blueprint, request, g
 from datetime import datetime
@@ -23,7 +26,7 @@ try:
     GOOGLE_AUTH_AVAILABLE = True
 except ImportError:
     GOOGLE_AUTH_AVAILABLE = False
-    print("⚠️  google-auth not installed. Google authentication will not work.")
+    logger.warning("⚠️  google-auth not installed. Google authentication will not work.")
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
@@ -65,10 +68,10 @@ def google_auth():
             if not email:
                 return APIResponse.error("NO_EMAIL", "Email not available in Google token", 401)
 
-            print(f"✅ Google token verified for: {email}")
+            logger.info(f"✅ Google token verified for: {email}")
 
         except ValueError as e:
-            print(f"❌ Invalid Google token: {str(e)}")
+            logger.error(f"❌ Invalid Google token: {str(e)}")
             return APIResponse.error("INVALID_TOKEN", "Invalid Google token", 401)
 
         db = SessionLocal()
@@ -76,7 +79,7 @@ def google_auth():
             user = get_user_by_email(db, email)
 
             if not user:
-                print(f"👤 Creating new user: {email}")
+                logger.info(f"👤 Creating new user: {email}")
                 user = create_user(
                     db,
                     email=email,
@@ -84,14 +87,14 @@ def google_auth():
                     google_id=google_id,
                     picture_url=picture_url
                 )
-                print(f"✅ User created: {user.id}")
+                logger.info(f"✅ User created: {user.id}")
             else:
                 user.last_login = datetime.utcnow()
                 db.commit()
-                print(f"✅ User already exists: {user.id}")
+                logger.info(f"✅ User already exists: {user.id}")
 
             tokens = JWTManager.generate_tokens(user.id, user.email)
-            print(f"🔐 Generated JWT for user: {user.id}")
+            logger.info(f"🔐 Generated JWT for user: {user.id}")
 
             return APIResponse.success({
                 "access_token": tokens['access_token'],
@@ -110,7 +113,7 @@ def google_auth():
             db.close()
 
     except Exception as e:
-        print(f"❌ Google auth error: {str(e)}")
+        logger.error(f"❌ Google auth error: {str(e)}")
         return APIResponse.server_error(f"Authentication failed: {str(e)}", e)
 
 
@@ -170,7 +173,7 @@ def signup():
             convert_lead_to_customer(leads_db, email, user_id, "free")
             leads_db.close()
         except Exception as lead_error:
-            print(f"⚠️  Lead conversion failed: {lead_error}")
+            logger.error(f"⚠️  Lead conversion failed: {lead_error}")
 
         return APIResponse.success({
             "user": user_dict,
@@ -369,4 +372,4 @@ def reset_password():
 
 
 if __name__ == "__main__":
-    print("✅ Auth routes module ready")
+    logger.info("✅ Auth routes module ready")

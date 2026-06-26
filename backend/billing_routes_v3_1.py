@@ -1,6 +1,9 @@
 """
 Billing Routes - Subscription management and Stripe integration
 """
+import logging
+logger = logging.getLogger(__name__)
+
 
 from flask import Blueprint, request, g
 from datetime import datetime, timedelta
@@ -241,4 +244,4 @@ def create_payment_intent():
 
 
 if __name__ == "__main__":
-    print("✅ Billing routes module ready")
+    logger.info("✅ Billing routes module ready")

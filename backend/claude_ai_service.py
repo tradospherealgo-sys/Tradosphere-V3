@@ -160,11 +160,11 @@ class ClaudeAIService:
 
 if __name__ == "__main__":
     # Test Claude AI Service
-    print("✅ Claude AI Service Ready")
+    logger.info("✅ Claude AI Service Ready")
     result = ClaudeAIService.analyze_market_data(
         "NIFTY",
         24000,
         3.5,
         {"EMA": "bullish", "RSI": 65, "MACD": "positive"}
     )
-    print(json.dumps(result, indent=2))
+    logger.info(json.dumps(result, indent=2))

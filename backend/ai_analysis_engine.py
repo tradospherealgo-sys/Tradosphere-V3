@@ -2,6 +2,9 @@
 AI Analysis Engine - Generate intelligent market insights
 Analyzes all market data to provide recommendations and insights
 """
+import logging
+logger = logging.getLogger(__name__)
+
 
 from typing import Dict, List, Optional
 from datetime import datetime
@@ -117,7 +120,7 @@ class AIAnalysisEngine:
             }
 
         except Exception as e:
-            print(f"AI Analysis error: {str(e)}")
+            logger.error(f"AI Analysis error: {str(e)}")
             import traceback
             traceback.print_exc()
             return {"status": "error", "message": str(e)}
