@@ -11,7 +11,10 @@ logger = logging.getLogger(__name__)
 import pytz
 from datetime import datetime, time
 from typing import Dict, List, Optional, Tuple
-from database import (
+# F-11: import from the v3.1 schema (multi-tenant Signal model), NOT the legacy
+# database.py. The legacy Signal model differs from v3.1, so reconciliation was
+# reading/writing the wrong table and would AttributeError on v3.1 attributes.
+from database_v3_1 import (
     SessionLocal, Signal, get_candles, get_metrics
 )
 

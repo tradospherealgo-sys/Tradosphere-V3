@@ -12,12 +12,22 @@ from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variables FIRST, before any other imports
-env_file = Path(__file__).parent.parent / '.env.development'
-if env_file.exists():
-    load_dotenv(env_file)
+# Load environment variables FIRST, before any other imports.
+# SECURITY (F-10): never load .env.development in production. The production
+# platform (Render) injects real secrets as process env vars; a stray
+# .env.development that reached the server must never be able to supply or
+# override production secrets (a leaked JWT_SECRET would allow forging tokens
+# for any user). FLASK_ENV is set as a real env var by the platform, so it is
+# reliable here before any dotenv load. We only read .env.development when we
+# are NOT running in production.
+if os.getenv('FLASK_ENV', '').lower() == 'production':
+    load_dotenv()  # real process environment / standard .env only
 else:
-    load_dotenv()  # Fallback to default .env loading
+    env_file = Path(__file__).parent.parent / '.env.development'
+    if env_file.exists():
+        load_dotenv(env_file)
+    else:
+        load_dotenv()  # Fallback to default .env loading
 
 # Set working directory to script location
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -132,7 +142,10 @@ _ALLOWED_ORIGINS = [
     "http://localhost:5001",
     "https://tradosphere.vercel.app",
     "https://www.tradosphere.vercel.app",
-    "https://*.vercel.app",
+    # SECURITY (F-09): the "https://*.vercel.app" wildcard was removed. With
+    # supports_credentials=True it matched ANY Vercel deployment (including
+    # attacker-controlled ones), allowing credentialed cross-origin calls on
+    # behalf of logged-in users. Only the exact production URL(s) are allowed.
     "https://tradosphere.in",
     "https://www.tradosphere.in",
     "https://tradosphere-v3.onrender.com",
@@ -299,7 +312,43 @@ def _metrics_after_request(response):
     return response
 
 
+@app.after_request
+def _security_headers(response):
+    """F-15/F-16: attach defensive security headers to every response.
+
+    These mitigate clickjacking (X-Frame-Options/frame-ancestors), MIME
+    sniffing (X-Content-Type-Options), referrer leakage, and enforce HTTPS in
+    production (HSTS). The CSP is intentionally conservative; the frontend is
+    served from Vercel as static files and talks to this API over fetch, so it
+    does not need inline-script privileges from this origin.
+    """
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+    )
+    # Only assert HSTS in production (and over HTTPS) so local http dev still works.
+    if os.getenv("FLASK_ENV", "").lower() == "production":
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+    return response
+
+
+def html_escape(value) -> str:
+    """F-15: escape user-controlled text before it is embedded in any HTML.
+
+    Use this for any value that originates from user input and gets rendered
+    into an HTML context (e.g. server-rendered fragments, email templates).
+    """
+    import html as _html
+    return _html.escape("" if value is None else str(value), quote=True)
+
+
 logger.info("✅ Monitoring & metrics wired (Tier 2 #10)")
+logger.info("✅ Security headers + HTML escaping wired (F-15/F-16)")
 
 # ===== INPUT VALIDATION (Tier 2 #7) =====
 from schemas import (
@@ -323,27 +372,33 @@ from realtime import (
 )
 init_socketio(app)
 
-# Default index prices used when the broker is unavailable (mirrors the REST
-# fallback behavior — kept lightweight so the broadcaster never blocks).
-_WS_FALLBACK_PRICES = {"NIFTY": 24047.50, "BANKNIFTY": 57489.75, "FINNIFTY": 18950.00}
-
-
 def _ws_get_live_prices():
-    """Return current index prices for the broadcaster (live if available)."""
+    """Return current REAL index prices for the WebSocket broadcaster.
+
+    INTEGRITY (F-19): this previously fell back to hardcoded prices
+    (NIFTY 24047.50 / BANKNIFTY 57489.75 / FINNIFTY 18950.00) whenever the
+    broker was unavailable, streaming fabricated ticks to clients as if live —
+    the same problem F-19 fixes for the REST /api/market/live endpoint. It now
+    returns ONLY real LTPs that are actually available; when nothing real is
+    available it returns an empty dict and the broadcaster (which only emits on
+    a truthy result) pushes nothing. No fake prices ever go over the socket.
+    """
+    prices = {}
     try:
         if market is not None and market.is_authenticated():
-            nifty = market.get_nifty_price() or {}
-            banknifty = market.get_banknifty_price() or {}
-            finnifty = market.get_finnifty_price() or {}
-            prices = {
-                "NIFTY": nifty.get("ltp", _WS_FALLBACK_PRICES["NIFTY"]),
-                "BANKNIFTY": banknifty.get("ltp", _WS_FALLBACK_PRICES["BANKNIFTY"]),
-                "FINNIFTY": finnifty.get("ltp", _WS_FALLBACK_PRICES["FINNIFTY"]),
+            sources = {
+                "NIFTY": market.get_nifty_price,
+                "BANKNIFTY": market.get_banknifty_price,
+                "FINNIFTY": market.get_finnifty_price,
             }
-            return prices
+            for sym, fetch in sources.items():
+                data = fetch() or {}
+                ltp = data.get("ltp")
+                if ltp is not None:
+                    prices[sym] = ltp
     except Exception as _ws_err:
-        logger.debug(f"WS price fetch fell back: {_ws_err}")
-    return dict(_WS_FALLBACK_PRICES)
+        logger.debug(f"WS price fetch skipped: {_ws_err}")
+    return prices
 
 
 # The perpetual broadcaster is opt-in (off by default) so importing the app
@@ -398,6 +453,17 @@ MultiTenantMiddleware.register_tenant_middleware(app) if hasattr(MultiTenantMidd
 # Global market data instance
 market = None
 _market_initialized = False
+# F-18: the broker can be (re)connected from a background thread while request
+# handlers read the `market` global concurrently. Guard every assignment and
+# read of `market` with this lock so a request can never observe a half-set or
+# torn reference during reconnection.
+_market_lock = threading.Lock()
+
+
+def get_market():
+    """Thread-safe accessor for the current market data instance."""
+    with _market_lock:
+        return market
 
 def init_market_data():
     """Initialize market data with credentials
@@ -422,12 +488,15 @@ def init_market_data():
 
         if not api_key or not client_code or not pin:
             logger.warning("⚠️  Angel One credentials not fully configured")
-            market = None
+            with _market_lock:
+                market = None
             return
 
         # Create market data instance (handles auth internally)
         # This may fail with rate limit on multiple workers
-        market = AngelOneMarketData(api_key, client_code, pin, totp_secret)
+        _m = AngelOneMarketData(api_key, client_code, pin, totp_secret)
+        with _market_lock:
+            market = _m
         logger.info("✅ Angel One market data initialized successfully")
     except Exception as e:
         # CRITICAL FIX: Catch auth failures and allow worker to boot
@@ -444,7 +513,8 @@ def init_market_data():
 
         # Set market to None to trigger fallback behavior
         # This allows worker to boot and serve requests with fallback data
-        market = None
+        with _market_lock:
+            market = None
 
 # Initialize at module import time
 # Multiple workers will each attempt this, but with graceful degradation
@@ -482,7 +552,9 @@ def _retry_broker_connection():
                 logger.warning("⚠️  Credentials still not configured, giving up")
                 break
 
-            market = AngelOneMarketData(api_key, client_code, pin, totp_secret)
+            _m = AngelOneMarketData(api_key, client_code, pin, totp_secret)
+            with _market_lock:
+                market = _m
             logger.info("✅ Broker reconnected successfully on retry!")
             break
 
@@ -540,7 +612,9 @@ def get_config():
     """Get public configuration (no auth required)"""
     return APIResponse.success({
         "google_client_id": os.getenv("GOOGLE_CLIENT_ID", ""),
-        "stripe_publishable_key": os.getenv("STRIPE_PUBLISHABLE_KEY", ""),
+        # Stripe removed — paid plans are "coming soon", so no payment key is
+        # exposed to the frontend.
+        "payments_available": False,
         "environment": os.getenv("FLASK_ENV", "production"),
         "api_version": "3.1"
     })
@@ -1028,35 +1102,21 @@ def market_live():
             except Exception as e:
                 logger.info(f"⚠️  BANKNIFTY fetch error: {str(e)}")
 
-        # If no real data from Angel One, return demo data
+        # F-19: when the broker is unavailable, DO NOT inject hardcoded ticker
+        # prices that render as if live. Return an explicit offline status with
+        # no fabricated tickers so the frontend shows a 'market data offline'
+        # state instead of stale numbers presented as current.
         if not tickers:
-            tickers = [
-                {
-                    "symbol": "NIFTY",
-                    "current_price": 24047.50,
-                    "change": 234.15,
-                    "change_percent": 0.97,
-                    "open": 23820.00,
-                    "high": 24150.00,
-                    "low": 23750.00,
-                    "volume": 1200000000,
-                    "timestamp": datetime.utcnow().isoformat()
-                },
-                {
-                    "symbol": "BANKNIFTY",
-                    "current_price": 57489.75,
-                    "change": 512.45,
-                    "change_percent": 0.90,
-                    "open": 57100.00,
-                    "high": 57650.00,
-                    "low": 56950.00,
-                    "volume": 850000000,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-            ]
+            return APIResponse.success({
+                "tickers": [],
+                "data_status": "offline",
+                "message": "Live market data is currently unavailable (broker not connected).",
+                "timestamp": datetime.utcnow().isoformat()
+            })
 
         return APIResponse.success({
             "tickers": tickers,
+            "data_status": "live",
             "timestamp": datetime.utcnow().isoformat()
         })
 
@@ -1078,10 +1138,18 @@ def technical_analysis():
         if not market or not market.is_authenticated():
             return APIResponse.unauthorized("Broker not connected")
 
-        # Get candles from Angel One (with fallback to test data)
+        # Get REAL candles from Angel One. get_historical_candles() returns None
+        # when live data is unavailable (F-01) — it never fabricates OHLCV.
         candles = market.get_historical_candles(symbol, interval, limit)
 
-        if not candles or len(candles) < 26:
+        if candles is None:
+            return jsonify({
+                "status": "error",
+                "data_status": "unavailable",
+                "message": f"Live market data unavailable for {symbol} — broker not yet connected. Please try again shortly."
+            }), 503
+
+        if len(candles) < 26:
             return jsonify({
                 "status": "error",
                 "message": f"Insufficient candle data for {symbol} (need minimum 26 candles)"
@@ -1139,10 +1207,18 @@ def options_analysis():
         if symbol not in ['NIFTY', 'BANKNIFTY', 'FINNIFTY']:
             symbol = 'NIFTY'
 
-        # Get option chain from Angel One (or demo data)
+        # Get REAL option chain from Angel One. get_option_chain() returns None
+        # when the broker options feed is unavailable (F-02) — never fabricated.
         option_chain = market.get_option_chain(symbol, expiry)
 
-        if not option_chain or option_chain.get("status") != "success":
+        if option_chain is None:
+            return jsonify({
+                "status": "error",
+                "data_status": "unavailable",
+                "message": f"Live options data unavailable for {symbol} — broker options feed not connected. Please try again shortly."
+            }), 503
+
+        if option_chain.get("status") != "success":
             return jsonify({
                 "status": "error",
                 "message": f"Could not fetch option chain for {symbol}"
@@ -1471,30 +1547,99 @@ def validate_signal_consistency():
 @app.route('/api/ai-analysis', methods=['GET'])
 @AuthDecorator.token_required
 def get_ai_analysis():
-    """Get AI analysis for a symbol (simple GET endpoint)"""
-    symbol = request.args.get('symbol', 'NIFTY')
+    """Get AI analysis for a symbol from LIVE market data.
 
-    # Validate symbol
-    if symbol not in ['NIFTY', 'BANKNIFTY', 'FINNIFTY']:
-        symbol = 'NIFTY'
+    INTEGRITY (F-07): this endpoint previously hardcoded the price
+    (24000 for NIFTY / 58000 for BANKNIFTY) and fake indicators
+    (EMA bullish / RSI 65 / MACD positive) and passed them to Claude as if
+    they were live — so the AI narrative could describe a price the market
+    was nowhere near. It now fetches the real LTP and computes real technical
+    indicators from live candles, and returns HTTP 503 when the broker is
+    unavailable instead of analysing fabricated inputs.
+    """
+    try:
+        symbol = request.args.get('symbol', 'NIFTY')
 
-    # Get live price
-    price = 24000 if symbol == 'NIFTY' else 58000
-    change = 3.5
+        # Validate symbol
+        if symbol not in ['NIFTY', 'BANKNIFTY', 'FINNIFTY']:
+            symbol = 'NIFTY'
 
-    # Generate analysis using Claude
-    analysis = ClaudeAIService.analyze_market_data(
-        symbol,
-        price,
-        change,
-        {
-            "EMA_13": "bullish",
-            "RSI": 65,
-            "MACD": "positive"
+        if not market or not market.is_authenticated():
+            return jsonify({
+                "status": "error",
+                "data_status": "unavailable",
+                "message": f"Live market data unavailable for {symbol} — broker not connected."
+            }), 503
+
+        # Live LTP from the broker (never hardcoded)
+        if symbol == 'NIFTY':
+            price_data = market.get_nifty_price()
+        elif symbol == 'BANKNIFTY':
+            price_data = market.get_banknifty_price()
+        else:
+            price_data = market.get_finnifty_price()
+
+        if not price_data or not price_data.get('ltp'):
+            return jsonify({
+                "status": "error",
+                "data_status": "unavailable",
+                "message": f"Live price unavailable for {symbol} — broker not connected."
+            }), 503
+
+        price = float(price_data['ltp'])
+
+        # Real candles + technical indicators (None when unavailable — F-01)
+        candles = market.get_historical_candles(symbol, '15', 100)
+        if candles is None or len(candles) < 26:
+            return jsonify({
+                "status": "error",
+                "data_status": "unavailable",
+                "message": f"Live technical data unavailable for {symbol} — insufficient live candles."
+            }), 503
+
+        technical = TechnicalEngine.analyze(candles)
+        if technical.get("status") != "success":
+            return jsonify({
+                "status": "error",
+                "message": "Technical analysis failed"
+            }), 400
+
+        # Real change %: latest live price vs previous candle close
+        try:
+            prev_close = float(candles[-2]['close'])
+            change_percent = ((price - prev_close) / prev_close * 100) if prev_close else 0.0
+        except Exception:
+            change_percent = 0.0
+
+        # Pass REAL indicators (not hardcoded) to Claude
+        technical_for_ai = {
+            "trend": technical.get("trend"),
+            "momentum": technical.get("momentum"),
+            "setup": technical.get("setup"),
+            "indicators": technical.get("indicators", {}),
+            "macd": technical.get("macd", {}),
+            "ema_crossover_signal": technical.get("ema_crossover_signal"),
         }
-    )
 
-    return APIResponse.success(analysis.get('analysis', {}))
+        analysis = ClaudeAIService.analyze_market_data(
+            symbol,
+            price,
+            change_percent,
+            technical_for_ai
+        )
+
+        if analysis.get("status") == "error":
+            return jsonify({
+                "status": "error",
+                "message": analysis.get("error", "AI analysis service is temporarily unavailable"),
+                "code": analysis.get("code", "AI_SERVICE_UNAVAILABLE")
+            }), 503
+
+        return APIResponse.success(analysis.get('analysis', {}))
+
+    except Exception as e:
+        logger.info(f"❌ Error in get_ai_analysis: {str(e)}")
+        return APIResponse.server_error(str(e), e)
 
 
 @app.route('/api/analysis/ai-insights', methods=['POST'])
@@ -1527,9 +1672,15 @@ def ai_insights():
             "current_price": market_data_obj.get('ltp', 0)
         }
 
-        # Get options chain
+        # Get options chain (REAL data only; None when unavailable — F-02)
         option_chain = market.get_option_chain(symbol, 'current')
-        if not option_chain or option_chain.get("status") != "success":
+        if option_chain is None:
+            return jsonify({
+                "status": "error",
+                "data_status": "unavailable",
+                "message": f"Live options data unavailable for {symbol} — broker not connected."
+            }), 503
+        if option_chain.get("status") != "success":
             return jsonify({
                 "status": "error",
                 "message": f"Could not fetch option chain for {symbol}"
@@ -1540,9 +1691,15 @@ def ai_insights():
             "max_pain": option_chain.get("max_pain", market_for_ai['current_price'])
         }
 
-        # Get technical indicators
+        # Get technical indicators (REAL candles only; None when unavailable — F-01)
         candles = market.get_historical_candles(symbol, '15', 100)
-        if not candles or len(candles) < 26:
+        if candles is None:
+            return jsonify({
+                "status": "error",
+                "data_status": "unavailable",
+                "message": f"Live market data unavailable for {symbol} — broker not connected."
+            }), 503
+        if len(candles) < 26:
             return jsonify({
                 "status": "error",
                 "message": f"Insufficient candle data for {symbol}"
@@ -1715,7 +1872,7 @@ def get_pending_approval_trades():
     try:
         from database_v3_1 import get_pending_approval_trades
 
-        trades = get_pending_approval_trades()
+        trades = get_pending_approval_trades(g.user_id)
 
         return jsonify({
             "status": "success",
@@ -1737,7 +1894,7 @@ def approve_trade(trade_id):
         data = request.json or {}
         reason = data.get('reason', 'User approved')
 
-        trade = approve_paper_trade(trade_id, reason)
+        trade = approve_paper_trade(trade_id, reason, g.user_id)
 
         if not trade:
             return jsonify({
@@ -1765,7 +1922,7 @@ def reject_trade(trade_id):
         data = request.json or {}
         reason = data.get('reason', 'User rejected')
 
-        trade = reject_paper_trade(trade_id, reason)
+        trade = reject_paper_trade(trade_id, reason, g.user_id)
 
         if not trade:
             return jsonify({
@@ -1790,7 +1947,7 @@ def get_open_trades():
     try:
         from database_v3_1 import get_open_trades
 
-        trades = get_open_trades()
+        trades = get_open_trades(g.user_id)
 
         return jsonify({
             "status": "success",
@@ -1818,7 +1975,7 @@ def close_trade(trade_id):
                 "message": "Missing required field: exit_price"
             }), 400
 
-        trade = close_paper_trade(trade_id, exit_price)
+        trade = close_paper_trade(trade_id, exit_price, g.user_id)
 
         if not trade:
             return jsonify({
@@ -1844,7 +2001,7 @@ def get_closed_trades():
         from database_v3_1 import get_closed_trades
 
         limit = request.args.get('limit', 100, type=int)
-        trades = get_closed_trades(limit)
+        trades = get_closed_trades(limit, g.user_id)
 
         return jsonify({
             "status": "success",
@@ -1863,7 +2020,7 @@ def get_trade(trade_id):
     try:
         from database_v3_1 import get_paper_trade
 
-        trade = get_paper_trade(trade_id)
+        trade = get_paper_trade(trade_id, g.user_id)
 
         if not trade:
             return jsonify({
@@ -1887,7 +2044,7 @@ def get_trading_stats():
     try:
         from database_v3_1 import get_paper_trading_stats
 
-        stats = get_paper_trading_stats()
+        stats = get_paper_trading_stats(g.user_id)
 
         return jsonify({
             "status": "success",
@@ -1907,7 +2064,7 @@ def get_dashboard_overview():
         from database_v3_1 import get_paper_trading_stats, get_all_signals, get_metrics
 
         # Get paper trading stats
-        trading_stats = get_paper_trading_stats()
+        trading_stats = get_paper_trading_stats(g.user_id)
 
         # Get signal metrics
         signals = get_all_signals(limit=10)
@@ -1988,6 +2145,10 @@ def _quick_technical_data(candles):
     if ema_20 is None or ema_50 is None or rsi is None:
         return None
 
+    # F-13: compute ATR(14) from live candles so the signal generator can size
+    # target/stop by real volatility instead of a fixed 2%.
+    atr = _compute_atr(candles, 14)
+
     return {
         "ema_20": ema_20,
         "ema_50": ema_50,
@@ -1997,7 +2158,36 @@ def _quick_technical_data(candles):
         "rsi": rsi,
         "macd": macd_data.get("macd", 0),
         "macd_signal": macd_data.get("signal_line", 0),
+        "atr": atr,
     }
+
+
+def _compute_atr(candles, period: int = 14):
+    """Average True Range from live OHLC candles. Returns None if insufficient
+    data or fields are missing (caller then falls back to a percentage stop)."""
+    try:
+        if not candles or len(candles) < period + 1:
+            return None
+        trs = []
+        prev_close = None
+        for c in candles:
+            high = c.get("high")
+            low = c.get("low")
+            close = c.get("close")
+            if high is None or low is None or close is None:
+                return None
+            high, low, close = float(high), float(low), float(close)
+            if prev_close is None:
+                tr = high - low
+            else:
+                tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+            trs.append(tr)
+            prev_close = close
+        if len(trs) < period:
+            return None
+        return sum(trs[-period:]) / period
+    except Exception:
+        return None
 
 
 def _quick_hold_signal(symbol, reason):
@@ -2194,8 +2384,7 @@ if __name__ == '__main__':
     logger.info("   ✅ User profile & settings")
     logger.info("   ✅ Session management")
     logger.info("\n✨ PHASE 2: Pro SaaS Features")
-    logger.info("   ✅ Subscription management (Free/Pro/Enterprise)")
-    logger.info("   ✅ Stripe payment integration")
+    logger.info("   ✅ Subscription tiers (paid plans COMING SOON — no payments)")
     logger.info("   ✅ Email notifications (SendGrid/SMTP)")
     logger.info("   ✅ Multi-broker support framework")
     logger.info("   ✅ Usage analytics & tracking")

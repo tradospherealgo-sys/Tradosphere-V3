@@ -182,9 +182,23 @@ class AuthDecorator:
             if not payload:
                 return jsonify({"status": "error", "message": "Invalid or expired token"}), 401
 
-            # Check admin status (will be validated in route by checking user record)
             g.user_id = payload.get("user_id")
             g.email = payload.get("email")
+
+            # F-06: enforce admin status against the DB record, not just the
+            # presence of a valid token. A normal user's token must never reach
+            # an admin route.
+            try:
+                from user_model_v3_1 import SessionLocal, get_user_by_id
+                db = SessionLocal()
+                user = get_user_by_id(db, g.user_id)
+                is_admin = bool(user and getattr(user, "is_admin", False))
+                db.close()
+            except Exception:
+                is_admin = False
+
+            if not is_admin:
+                return jsonify({"status": "error", "message": "Admin access required"}), 403
 
             return f(*args, **kwargs)
 

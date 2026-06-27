@@ -108,9 +108,20 @@ class TenantDataIsolation:
 
     @staticmethod
     def get_user_signals(db, user_id: int, limit: int = 50):
-        """Get signals (all users can see all signals)"""
+        """Get signals for a specific user only (F-21: tenant isolation).
+
+        Previously this returned EVERY user's signals regardless of user_id,
+        leaking one tenant's trading signals to another. It now filters by
+        user_id so callers only ever see their own rows.
+        """
         from database import Signal
-        return db.query(Signal).order_by(Signal.timestamp.desc()).limit(limit).all()
+        return (
+            db.query(Signal)
+            .filter(Signal.user_id == user_id)
+            .order_by(Signal.timestamp.desc())
+            .limit(limit)
+            .all()
+        )
 
     @staticmethod
     def get_user_trades(db, user_id: int, limit: int = 50):

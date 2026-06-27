@@ -31,6 +31,23 @@ except ImportError:
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
 
+# F-24: enforce a strong password policy everywhere a password is set.
+# Minimum 10 characters with at least one lowercase, one uppercase, and one
+# digit. Returns None if valid, or an error message string if invalid.
+import re as _re
+
+def validate_password_strength(password: str):
+    if not password or len(password) < 10:
+        return "Password must be at least 10 characters long"
+    if not _re.search(r"[a-z]", password):
+        return "Password must contain at least one lowercase letter"
+    if not _re.search(r"[A-Z]", password):
+        return "Password must contain at least one uppercase letter"
+    if not _re.search(r"[0-9]", password):
+        return "Password must contain at least one number"
+    return None
+
+
 @auth_bp.route('/google', methods=['POST'])
 @validate_body(GoogleAuthSchema)
 def google_auth():
@@ -138,8 +155,9 @@ def signup():
         if not EmailValidator.is_valid_email(email):
             return APIResponse.bad_request("Invalid email format")
 
-        if len(password) < 6:
-            return APIResponse.bad_request("Password must be at least 6 characters")
+        pw_error = validate_password_strength(password)
+        if pw_error:
+            return APIResponse.bad_request(pw_error)
 
         email = EmailValidator.normalize_email(email)
 
@@ -347,8 +365,9 @@ def reset_password():
         if not old_password or not new_password:
             return APIResponse.bad_request("Old and new passwords required")
 
-        if len(new_password) < 6:
-            return APIResponse.bad_request("New password must be at least 6 characters")
+        pw_error = validate_password_strength(new_password)
+        if pw_error:
+            return APIResponse.bad_request(pw_error)
 
         db = SessionLocal()
         user = get_user_by_id(db, user_id)

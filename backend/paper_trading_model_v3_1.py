@@ -154,6 +154,13 @@ class SignalTracking(Base):
     triggered_at = Column(DateTime, nullable=True)
     closed_at = Column(DateTime, nullable=True)
 
+    # Lifecycle status of the generated signal:
+    #   generated -> user has not acted yet
+    #   accepted  -> user approved; a PAPER trade was opened (never a live order)
+    #   rejected  -> user declined; recorded for accuracy analysis, no trade
+    #   closed    -> outcome recorded
+    status = Column(String, default="generated")
+
     # Metadata
     description = Column(Text, nullable=True)
 
@@ -166,10 +173,12 @@ class SignalTracking(Base):
             "symbol": self.symbol,
             "signal_type": self.signal_type,
             "direction": self.direction,
+            "status": self.status,
             "entry_price": self.entry_price,
             "target_price": self.target_price,
             "is_winning": self.is_winning,
             "accuracy_score": self.accuracy_score,
+            "status": self.status,
             "generated_at": self.generated_at.isoformat() if self.generated_at else None
         }
 
@@ -311,11 +320,55 @@ def track_signal(db, user_id: int, symbol: str, signal_type: str, direction: str
     return signal
 
 
+def reject_signal(db, signal_id: int, user_id: int, reason: str = None):
+    """Record that the user declined a generated signal.
+
+    No order (live OR paper) is created — the signal is simply marked
+    'rejected' so it still counts toward accuracy/analytics. Scoped to the
+    owning user so one tenant can never reject another's signal.
+    """
+    signal = db.query(SignalTracking).filter(
+        SignalTracking.id == signal_id,
+        SignalTracking.user_id == user_id
+    ).first()
+    if not signal:
+        return None
+
+    signal.status = "rejected"
+    signal.closed_at = datetime.utcnow()
+    if reason:
+        existing = signal.description or ""
+        signal.description = (existing + f" | rejected: {reason}").strip(" |")
+    db.commit()
+    db.refresh(signal)
+    return signal
+
+
+def accept_signal(db, signal_id: int, user_id: int):
+    """Mark a generated signal as accepted (a paper trade is opened separately).
+
+    Scoped to the owning user. This never places a live broker order — the
+    platform is paper-trading only.
+    """
+    signal = db.query(SignalTracking).filter(
+        SignalTracking.id == signal_id,
+        SignalTracking.user_id == user_id
+    ).first()
+    if not signal:
+        return None
+    signal.status = "accepted"
+    signal.triggered_at = datetime.utcnow()
+    db.commit()
+    db.refresh(signal)
+    return signal
+
+
 def close_signal(db, signal_id: int, outcome_price: float):
     """Close signal tracking and calculate accuracy"""
     signal = db.query(SignalTracking).filter(SignalTracking.id == signal_id).first()
     if not signal:
         return None
+    signal.status = "closed"
 
     signal.outcome_price = outcome_price
     signal.closed_at = datetime.utcnow()

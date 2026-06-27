@@ -10,12 +10,18 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variables FIRST
-env_file = Path(__file__).parent.parent / '.env.development'
-if env_file.exists():
-    load_dotenv(env_file)
-else:
+# Load environment variables FIRST.
+# SECURITY (F-10): never load .env.development in production — see the same
+# guard in tradosphere_saas_server_v3_1.py. Real prod secrets come from the
+# platform's process environment.
+if os.getenv('FLASK_ENV', '').lower() == 'production':
     load_dotenv()
+else:
+    env_file = Path(__file__).parent.parent / '.env.development'
+    if env_file.exists():
+        load_dotenv(env_file)
+    else:
+        load_dotenv()
 
 # Add backend to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -38,28 +44,11 @@ def init_database():
         for table in tables:
             print(f"   ✓ {table}")
 
-        # Create demo user if it doesn't exist
-        session = Session()
-        try:
-            from user_model_v3_1 import User
-            from auth_manager_v3_1 import PasswordManager
-
-            existing_user = session.query(User).filter_by(email="demo@tradosphere.com").first()
-            if not existing_user:
-                print("\n👤 Creating demo user...")
-                demo_user = User(
-                    email="demo@tradosphere.com",
-                    username="demo",
-                    password_hash=PasswordManager.hash_password("DemoPass@2024"),
-                    is_active=True
-                )
-                session.add(demo_user)
-                session.commit()
-                print("✅ Demo user created (demo@tradosphere.com / DemoPass@2024)")
-            else:
-                print("✅ Demo user already exists")
-        finally:
-            session.close()
+        # F-22: demo-user creation removed. init_database() previously created
+        # demo@tradosphere.com / DemoPass@2024 — a known, hardcoded credential
+        # that would be injected into the production user table on any fresh DB,
+        # giving anyone aware of it a valid login. Seed test accounts only via a
+        # separate, FLASK_ENV-gated staging script, never in DB init.
 
         print("\n✅ Database initialization complete!")
         return True

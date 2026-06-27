@@ -63,22 +63,43 @@ class RealSignalGenerator:
             else:
                 final_signal = 'HOLD'
             
-            # Calculate confidence
+            # F-12: this number is the agreement rate across the three
+            # independent technical checks (EMA, RSI, MACD), blended with the AI
+            # confidence input. It is NOT a calibrated probability of profit, so
+            # it is surfaced as "signal agreement %", not raw "confidence".
             base_confidence = (signal_counts.get(final_signal, 0) / 3) * 100
-            combined_confidence = (base_confidence + ai_confidence) / 2
-            
-            # Calculate trading levels
+            signal_agreement_pct = round(min((base_confidence + ai_confidence) / 2, 100), 0)
+
+            # F-13: derive target/stop from ATR (volatility) computed from live
+            # candles, not a fixed 2%. ATR adapts levels to the instrument's real
+            # volatility. We use a 1.5x ATR stop and a 2:1 reward:risk target.
+            # If ATR is unavailable we fall back to a percentage and label it.
+            atr = technical_data.get('atr')
             entry_price = price
+            levels_method = "atr"
+            try:
+                atr = float(atr) if atr is not None else None
+            except (TypeError, ValueError):
+                atr = None
+
+            if atr and atr > 0:
+                stop_distance = 1.5 * atr
+                target_distance = 3.0 * atr  # 2:1 reward:risk
+            else:
+                levels_method = "percent_fallback"
+                stop_distance = price * 0.02
+                target_distance = price * 0.02
+
             if final_signal == 'BUY':
-                target = price * 1.02  # 2% target
-                stop_loss = price * 0.98  # 2% stop loss
+                target = price + target_distance
+                stop_loss = price - stop_distance
             elif final_signal == 'SELL':
-                target = price * 0.98  # 2% target
-                stop_loss = price * 1.02  # 2% stop loss
+                target = price - target_distance
+                stop_loss = price + stop_distance
             else:
                 target = price
                 stop_loss = price
-            
+
             signal = {
                 "symbol": symbol,
                 "signal": final_signal,
@@ -94,7 +115,13 @@ class RealSignalGenerator:
                 "entry_price": round(entry_price, 2),
                 "target": round(target, 2),
                 "stop_loss": round(stop_loss, 2),
-                "confidence": round(min(combined_confidence, 100), 0),
+                "atr": round(atr, 2) if atr else None,
+                "levels_method": levels_method,
+                # F-12: honest label. "confidence" kept as an alias for backward
+                # compatibility but explicitly documented as signal agreement.
+                "signal_agreement_pct": signal_agreement_pct,
+                "confidence": signal_agreement_pct,
+                "confidence_basis": "signal_agreement",
                 "timestamp": datetime.utcnow().isoformat(),
                 "signals_used": [ema_signal, rsi_signal, macd_signal_result]
             }

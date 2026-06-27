@@ -533,11 +533,21 @@ def create_paper_trade(symbol: str, direction: str, entry_price: float, target_p
     finally:
         db.close()
 
-def approve_paper_trade(trade_id: int, reason: str = None) -> Dict:
-    """Approve a paper trade and change status to OPEN"""
+def _owner_filter(query, user_id):
+    """F-04: restrict a PaperTrade query to the owning user. created_by stores
+    the user id as a string, so compare as string."""
+    if user_id is None:
+        return query
+    return query.filter(PaperTrade.created_by == str(user_id))
+
+
+def approve_paper_trade(trade_id: int, reason: str = None, user_id=None) -> Dict:
+    """Approve a paper trade and change status to OPEN (owner only)."""
     db = get_db()
     try:
-        trade = db.query(PaperTrade).filter(PaperTrade.id == trade_id).first()
+        trade = _owner_filter(
+            db.query(PaperTrade).filter(PaperTrade.id == trade_id), user_id
+        ).first()
         if not trade:
             logger.error(f"❌ Trade {trade_id} not found")
             return None
@@ -559,11 +569,13 @@ def approve_paper_trade(trade_id: int, reason: str = None) -> Dict:
     finally:
         db.close()
 
-def reject_paper_trade(trade_id: int, reason: str = None) -> Dict:
-    """Reject a paper trade and change status to REJECTED"""
+def reject_paper_trade(trade_id: int, reason: str = None, user_id=None) -> Dict:
+    """Reject a paper trade and change status to REJECTED (owner only)."""
     db = get_db()
     try:
-        trade = db.query(PaperTrade).filter(PaperTrade.id == trade_id).first()
+        trade = _owner_filter(
+            db.query(PaperTrade).filter(PaperTrade.id == trade_id), user_id
+        ).first()
         if not trade:
             logger.error(f"❌ Trade {trade_id} not found")
             return None
@@ -584,11 +596,13 @@ def reject_paper_trade(trade_id: int, reason: str = None) -> Dict:
     finally:
         db.close()
 
-def close_paper_trade(trade_id: int, exit_price: float) -> Dict:
-    """Close an open paper trade and calculate P&L"""
+def close_paper_trade(trade_id: int, exit_price: float, user_id=None) -> Dict:
+    """Close an open paper trade and calculate P&L (owner only)."""
     db = get_db()
     try:
-        trade = db.query(PaperTrade).filter(PaperTrade.id == trade_id).first()
+        trade = _owner_filter(
+            db.query(PaperTrade).filter(PaperTrade.id == trade_id), user_id
+        ).first()
         if not trade:
             logger.error(f"❌ Trade {trade_id} not found")
             return None
@@ -621,59 +635,65 @@ def close_paper_trade(trade_id: int, exit_price: float) -> Dict:
     finally:
         db.close()
 
-def get_pending_approval_trades() -> List[Dict]:
-    """Get all trades pending approval"""
+def get_pending_approval_trades(user_id=None) -> List[Dict]:
+    """Get trades pending approval for the given user (F-04)."""
     db = get_db()
     try:
-        trades = db.query(PaperTrade).filter(
-            PaperTrade.status == "PENDING_APPROVAL"
+        trades = _owner_filter(
+            db.query(PaperTrade).filter(PaperTrade.status == "PENDING_APPROVAL"), user_id
         ).order_by(PaperTrade.created_at.desc()).all()
         return [t.to_dict() for t in trades]
     finally:
         db.close()
 
-def get_open_trades() -> List[Dict]:
-    """Get all open paper trades"""
+def get_open_trades(user_id=None) -> List[Dict]:
+    """Get open paper trades for the given user (F-04)."""
     db = get_db()
     try:
-        trades = db.query(PaperTrade).filter(
-            PaperTrade.status == "OPEN"
+        trades = _owner_filter(
+            db.query(PaperTrade).filter(PaperTrade.status == "OPEN"), user_id
         ).order_by(PaperTrade.created_at.desc()).all()
         return [t.to_dict() for t in trades]
     finally:
         db.close()
 
-def get_closed_trades(limit: int = 100) -> List[Dict]:
-    """Get closed paper trades"""
+def get_closed_trades(limit: int = 100, user_id=None) -> List[Dict]:
+    """Get closed paper trades for the given user (F-04)."""
     db = get_db()
     try:
-        trades = db.query(PaperTrade).filter(
-            PaperTrade.status == "CLOSED"
+        trades = _owner_filter(
+            db.query(PaperTrade).filter(PaperTrade.status == "CLOSED"), user_id
         ).order_by(PaperTrade.closed_at.desc()).limit(limit).all()
         return [t.to_dict() for t in trades]
     finally:
         db.close()
 
-def get_paper_trade(trade_id: int) -> Optional[Dict]:
-    """Get a specific paper trade"""
+def get_paper_trade(trade_id: int, user_id=None) -> Optional[Dict]:
+    """Get a specific paper trade owned by the given user (F-04)."""
     db = get_db()
     try:
-        trade = db.query(PaperTrade).filter(PaperTrade.id == trade_id).first()
+        trade = _owner_filter(
+            db.query(PaperTrade).filter(PaperTrade.id == trade_id), user_id
+        ).first()
         return trade.to_dict() if trade else None
     finally:
         db.close()
 
-def get_paper_trading_stats() -> Dict:
-    """Get paper trading statistics"""
+def get_paper_trading_stats(user_id=None) -> Dict:
+    """Get paper trading statistics scoped to the given user (F-04)."""
     db = get_db()
     try:
-        total_trades = db.query(PaperTrade).count()
-        open_trades = db.query(PaperTrade).filter(PaperTrade.status == "OPEN").count()
-        closed_trades = db.query(PaperTrade).filter(PaperTrade.status == "CLOSED").count()
-        pending_approval = db.query(PaperTrade).filter(PaperTrade.status == "PENDING_APPROVAL").count()
+        def q(status=None):
+            base = _owner_filter(db.query(PaperTrade), user_id)
+            return base.filter(PaperTrade.status == status) if status else base
+
+        total_trades = q().count()
+        open_trades = q("OPEN").count()
+        closed_trades = q("CLOSED").count()
+        pending_approval = q("PENDING_APPROVAL").count()
 
         total_pnl = 0.0
-        closed = db.query(PaperTrade).filter(PaperTrade.status == "CLOSED").all()
+        closed = q("CLOSED").all()
         if closed:
             total_pnl = sum(t.pnl for t in closed if t.pnl is not None)
 
@@ -683,15 +703,17 @@ def get_paper_trading_stats() -> Dict:
             "closed_trades": closed_trades,
             "pending_approval": pending_approval,
             "total_pnl": round(total_pnl, 2),
-            "win_rate": _calculate_win_rate(db),
+            "win_rate": _calculate_win_rate(db, user_id),
             "avg_pnl_per_trade": round(total_pnl / closed_trades, 2) if closed_trades > 0 else 0.0
         }
     finally:
         db.close()
 
-def _calculate_win_rate(db) -> float:
-    """Calculate win rate from closed trades"""
-    closed = db.query(PaperTrade).filter(PaperTrade.status == "CLOSED").all()
+def _calculate_win_rate(db, user_id=None) -> float:
+    """Calculate win rate from the given user's closed trades."""
+    closed = _owner_filter(
+        db.query(PaperTrade).filter(PaperTrade.status == "CLOSED"), user_id
+    ).all()
     if not closed:
         return 0.0
     wins = sum(1 for t in closed if t.pnl and t.pnl > 0)

@@ -1,0 +1,10 @@
+[tools]
+python = "3.11.9"
+
+[settings]
+# Render's Railpack builder uses mise to install Python. As of mid-2026 mise
+# verifies GitHub artifact attestations by default, and the cpython 3.11.9
+# build has none published — which makes the install step fail with
+# "No GitHub artifact attestations found for python@3.11.9".
+# Disabling attestation verification restores the previous (working) behavior.
+python.github_attestations = false

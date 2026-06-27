@@ -178,19 +178,23 @@ class Backtest:
         initial_capital: float = 100000,
         market_data=None  # Inject for testing
     ) -> Dict:
-        """Run backtest on historical data"""
-        try:
-            # Import here to avoid circular imports
-            from market_data import AngelOneMarketData
+        """Run backtest on historical data.
 
+        F-20: a real, authenticated market_data instance MUST be supplied by the
+        caller. Previously this fabricated an AngelOneMarketData with empty
+        credentials, which could never return real candles and silently produced
+        meaningless backtests. We now refuse to run without a real data source.
+        """
+        try:
             if market_data is None:
-                # Try to get live data if available
-                market_data = AngelOneMarketData(
-                    api_key="",
-                    client_code="",
-                    pin="",
-                    totp_secret=""
-                )
+                return {
+                    "status": "error",
+                    "message": (
+                        "Backtest requires a connected market data source. "
+                        "No broker connection is available — try again once the "
+                        "broker is connected."
+                    ),
+                }
 
             # Get historical candles
             candles = market_data.get_historical_candles(
@@ -278,7 +282,8 @@ class Backtest:
         symbol: str,
         interval: str = "15",
         days_back: int = 30,
-        initial_capital: float = 100000
+        initial_capital: float = 100000,
+        market_data=None  # F-20: real data source required
     ) -> Dict:
         """Compare all available strategies"""
         strategies = [
@@ -293,7 +298,8 @@ class Backtest:
                 strategy=strategy,
                 interval=interval,
                 days_back=days_back,
-                initial_capital=initial_capital
+                initial_capital=initial_capital,
+                market_data=market_data
             )
             if result.get("status") == "success":
                 results.append(result)

@@ -433,9 +433,11 @@ class AngelOneMarketData:
                 ).order_by(MarketSnapshot.timestamp).all()
 
                 if not snapshots or len(snapshots) < 2:
-                    logger.warning(f"⚠️  Insufficient snapshots for {symbol} {timeframe} - using mock data for testing")
-                    # Generate mock candles for testing - with realistic values
-                    return self._generate_test_candles(symbol, timeframe, limit)
+                    # INTEGRITY (F-01): never fabricate candles. Return None so the
+                    # caller surfaces an honest 'data unavailable' response instead
+                    # of analysing seeded-random OHLCV as if it were real.
+                    logger.warning(f"⚠️  Insufficient snapshots for {symbol} {timeframe} - data unavailable")
+                    return None
 
                 # Build candles from snapshots
                 candles = self._build_candles_from_snapshots(snapshots, timeframe)
@@ -443,8 +445,9 @@ class AngelOneMarketData:
                 if candles:
                     logger.info(f"✅ Generated {len(candles)} candles for {symbol} from {timeframe} snapshots")
                 else:
-                    logger.error(f"⚠️  Could not generate candles for {symbol}, using mock data")
-                    return self._generate_test_candles(symbol, timeframe, limit)
+                    # INTEGRITY (F-01): no real candles -> return None, never fabricate.
+                    logger.error(f"⚠️  Could not generate candles for {symbol} - data unavailable")
+                    return None
 
                 return candles
 
@@ -453,54 +456,13 @@ class AngelOneMarketData:
 
         except Exception as e:
             logger.error(f"❌ Error fetching historical candles: {str(e)}")
-            # Fallback to test candles
-            return self._generate_test_candles(symbol, timeframe, limit)
+            # INTEGRITY (F-01): on error, return None instead of fabricated candles.
+            return None
 
-    def _generate_test_candles(self, symbol: str, timeframe: str, limit: int) -> list:
-        """Generate realistic test candles for initial setup"""
-        from datetime import datetime, timedelta
-
-        candles = []
-        now = datetime.utcnow()
-
-        # Base prices
-        base_prices = {
-            "NIFTY": 23161.6,
-            "BANKNIFTY": 55176.75
-        }
-
-        base_price = base_prices.get(symbol, 20000)
-
-        # Generate candles going back in time
-        interval_mins = int(timeframe) if timeframe != "daily" else 1440
-        current_price = base_price
-
-        for i in range(limit, 0, -1):
-            candle_time = now - timedelta(minutes=interval_mins * i)
-
-            # Realistic price movement (±0.5% per candle)
-            import random
-            random.seed(int(candle_time.timestamp()))  # Consistent random for same time
-
-            open_price = current_price
-            close_price = current_price * (1 + random.uniform(-0.005, 0.005))
-            high_price = max(open_price, close_price) * (1 + random.uniform(0, 0.003))
-            low_price = min(open_price, close_price) * (1 - random.uniform(0, 0.003))
-            volume = random.randint(100000, 500000)
-
-            candles.append({
-                "time": candle_time.strftime("%d-%m-%Y %H:%M:%S"),
-                "open": round(open_price, 2),
-                "high": round(high_price, 2),
-                "low": round(low_price, 2),
-                "close": round(close_price, 2),
-                "volume": volume
-            })
-
-            current_price = close_price
-
-        logger.info(f"✅ Generated {len(candles)} test candles for {symbol} {timeframe}")
-        return candles
+    # INTEGRITY (F-01): _generate_test_candles() was removed. The live analysis
+    # path must never serve seeded-random OHLCV as if it were real market data.
+    # get_historical_candles() now returns None when real candles are unavailable
+    # and callers surface an honest 'data unavailable' (HTTP 503) response.
 
     def _build_candles_from_snapshots(self, snapshots, timeframe: str) -> list:
         """Build candles from live market snapshots"""
@@ -678,11 +640,12 @@ class AngelOneMarketData:
                 logger.info(f"   ✅ Real option chain fetched from Angel One API")
                 return real_option_chain
 
-            # Fallback to synthetic generation if API fails
-            logger.error(f"   ⚠️  Angel One API failed or returned no data, using smart fallback generation")
-            option_chain = self._generate_option_chain(symbol, spot_price, expiry or "current")
-
-            return option_chain
+            # INTEGRITY (F-02): never fabricate an option chain. If the real
+            # Angel One options API is unavailable, return None so callers surface
+            # 'data unavailable' instead of computing PCR / max-pain / OI-bias
+            # signal scores from random OI / IV / LTP values.
+            logger.error(f"   ⚠️  Angel One options API failed or returned no data for {symbol} - data unavailable")
+            return None
 
         except Exception as e:
             logger.error(f"❌ Error fetching option chain: {str(e)}")
@@ -842,118 +805,10 @@ class AngelOneMarketData:
             logger.error(f"   ⚠️  Error parsing option chain: {str(e)}")
             return None
 
-    def _generate_option_chain(self, symbol: str, spot_price: float, expiry: str) -> Dict:
-        """
-        Generate realistic option chain data with smart fallback
-
-        Smart Fallback Strategy:
-        - If broker API fails, generates 10 strikes above and 10 below spot
-        - Includes realistic OI distribution
-        - Injects synthetic Greeks (Delta, Gamma) via Black-Scholes
-        """
-        import random
-        from datetime import datetime, timedelta
-        from greeks_calculator import GreeksInjector
-
-        # Determine strike range based on symbol
-        if symbol == "NIFTY":
-            strike_interval = 50
-            num_strikes_each_side = 10  # 10 above + 10 below = 20 total
-        else:  # BANKNIFTY
-            strike_interval = 100
-            num_strikes_each_side = 10
-
-        strikes = []
-        total_ce_oi = 0
-        total_pe_oi = 0
-
-        # Generate strikes: 10 below, ATM, 10 above spot
-        base_strike = int(spot_price / strike_interval) * strike_interval
-
-        for offset in range(-num_strikes_each_side, num_strikes_each_side + 1):
-            strike = base_strike + (offset * strike_interval)
-
-            # Smart OI distribution: Higher near ATM, lower as we move away
-            distance_from_atm = abs(offset)
-            atm_factor = 1.0 - (distance_from_atm / (num_strikes_each_side + 1)) * 0.7
-
-            # CE data - Call OI tends to increase for ITM calls (lower strikes)
-            if offset < 0:  # ITM calls (strike < spot)
-                ce_oi = random.randint(int(200000 * atm_factor), int(400000 * atm_factor))
-            else:  # OTM calls (strike > spot)
-                ce_oi = random.randint(int(50000 * atm_factor), int(250000 * atm_factor))
-
-            ce_volume = random.randint(max(500, int(10000 * atm_factor)), int(50000 * atm_factor))
-            ce_ltp = max(0.05, spot_price - strike + random.uniform(-20, 20))
-            ce_iv = random.uniform(12, 40)  # More realistic IV range
-
-            # PE data - Put OI tends to increase for ITM puts (higher strikes)
-            if offset > 0:  # ITM puts (strike > spot)
-                pe_oi = random.randint(int(200000 * atm_factor), int(400000 * atm_factor))
-            else:  # OTM puts (strike < spot)
-                pe_oi = random.randint(int(50000 * atm_factor), int(250000 * atm_factor))
-
-            pe_volume = random.randint(max(500, int(10000 * atm_factor)), int(50000 * atm_factor))
-            pe_ltp = max(0.05, strike - spot_price + random.uniform(-20, 20))
-            pe_iv = random.uniform(12, 40)
-
-            total_ce_oi += ce_oi
-            total_pe_oi += pe_oi
-
-            strikes.append({
-                "strike": strike,
-                "ce": {
-                    "ltp": round(ce_ltp, 2),
-                    "oi": ce_oi,
-                    "volume": ce_volume,
-                    "iv": round(ce_iv, 2)
-                },
-                "pe": {
-                    "ltp": round(pe_ltp, 2),
-                    "oi": pe_oi,
-                    "volume": pe_volume,
-                    "iv": round(pe_iv, 2)
-                }
-            })
-
-        # Calculate PCR
-        pcr = total_pe_oi / total_ce_oi if total_ce_oi > 0 else 1.0
-
-        option_chain = {
-            "status": "success",
-            "symbol": symbol,
-            "spot_price": spot_price,
-            "expiry": expiry,
-            "total_call_oi": total_ce_oi,
-            "total_put_oi": total_pe_oi,
-            "pcr": round(pcr, 3),
-            "strikes": strikes,
-            "generation_method": "SMART_FALLBACK",
-            "timestamp": datetime.utcnow().isoformat()
-        }
-
-        # Inject synthetic Greeks into the option chain
-        try:
-            # Find ATM call and put for IV estimation
-            atm_call_ltp = None
-            atm_put_ltp = None
-
-            for strike_data in strikes:
-                if strike_data['strike'] == base_strike:  # ATM strike
-                    atm_call_ltp = strike_data['ce']['ltp']
-                    atm_put_ltp = strike_data['pe']['ltp']
-                    break
-
-            if atm_call_ltp and atm_put_ltp:
-                option_chain["strikes"] = GreeksInjector.inject_greeks_into_strikes(
-                    strikes, spot_price, atm_call_ltp, atm_put_ltp, days_to_expiry=1
-                )
-                option_chain["with_greeks"] = True
-        except Exception as e:
-            logger.warning(f"⚠️  Greeks injection skipped: {e}")
-            option_chain["with_greeks"] = False
-
-        return option_chain
+    # INTEGRITY (F-02): _generate_option_chain() was removed. Options analysis
+    # (PCR, max-pain, OI-bias) must be computed from REAL Angel One data only.
+    # get_option_chain() now returns None when the broker options API is
+    # unavailable, and callers surface an honest 'data unavailable' (HTTP 503).
 
     def save_option_chain_to_db(self, option_chain: Dict) -> bool:
         """

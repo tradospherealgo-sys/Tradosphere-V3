@@ -8,7 +8,7 @@ from auth_manager_v3_1 import AuthDecorator
 from paper_trading_model_v3_1 import (
     PaperAccount, PaperTrade, SignalTracking, SessionLocal as PaperSession,
     get_or_create_account, open_trade, close_trade, get_account_trades,
-    track_signal, close_signal
+    track_signal, close_signal, reject_signal, accept_signal
 )
 from response_handler import APIResponse
 
@@ -261,6 +261,48 @@ def close_tracked_signal(signal_id):
         result = signal.to_dict()
         db.close()
 
+        return APIResponse.success(result)
+
+    except Exception as e:
+        return APIResponse.server_error(str(e), e)
+
+
+@trading_bp.route('/signal/<int:signal_id>/reject', methods=['POST'])
+@AuthDecorator.token_required
+def reject_tracked_signal(signal_id):
+    """User declined a generated signal — record it as 'rejected' (no trade)."""
+    try:
+        user_id = g.user_id
+        data = request.json or {}
+        reason = data.get('reason')
+
+        db = PaperSession()
+        signal = reject_signal(db, signal_id, user_id, reason)
+        if not signal:
+            db.close()
+            return APIResponse.not_found("Signal not found")
+        result = signal.to_dict()
+        db.close()
+        return APIResponse.success(result)
+
+    except Exception as e:
+        return APIResponse.server_error(str(e), e)
+
+
+@trading_bp.route('/signal/<int:signal_id>/accept', methods=['POST'])
+@AuthDecorator.token_required
+def accept_tracked_signal(signal_id):
+    """User approved a generated signal — mark accepted. A PAPER trade should be
+    opened via /trade/open; this NEVER places a live broker order."""
+    try:
+        user_id = g.user_id
+        db = PaperSession()
+        signal = accept_signal(db, signal_id, user_id)
+        if not signal:
+            db.close()
+            return APIResponse.not_found("Signal not found")
+        result = signal.to_dict()
+        db.close()
         return APIResponse.success(result)
 
     except Exception as e:

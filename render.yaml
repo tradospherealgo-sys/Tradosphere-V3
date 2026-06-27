@@ -40,6 +40,14 @@ services:
         value: /tmp/tradosphere-logs   # writable on Render; file logs are best-effort
       - key: APP_VERSION
         value: "3.1.0"
+      # Render's Railpack/mise builder fails to install Python 3.11.9 without
+      # this (no GitHub artifact attestations are published for that build).
+      - key: MISE_PYTHON_GITHUB_ATTESTATIONS
+        value: "false"
+      # Frontend origins allowed to call this API (F-09 strict CORS allow-list).
+      # Update if you add a custom domain.
+      - key: CORS_ORIGINS
+        value: "https://tradosphere.vercel.app,https://www.tradosphere.vercel.app"
 
       # ---- Security secrets (set in dashboard) ----
       - key: SECRET_KEY            # python3 -c "import secrets;print(secrets.token_urlsafe(48))"
@@ -61,11 +69,7 @@ services:
       - key: ANGEL_ONE_TOTP_SECRET
         sync: false
 
-      # ---- Stripe (use LIVE keys: sk_live_… / pk_live_…) ----
-      - key: STRIPE_API_KEY
-        sync: false
-      - key: STRIPE_PUBLISHABLE_KEY
-        sync: false
+      # Stripe removed — paid plans are "coming soon". No payment keys needed.
 
       # ---- Email (SendGrid or SMTP) ----
       - key: SENDGRID_API_KEY

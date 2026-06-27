@@ -1,5 +1,12 @@
 """
-Billing Routes - Subscription management and Stripe integration
+Billing Routes - Subscription tiers (payments COMING SOON)
+
+Product decision: paid subscriptions and online payments are not yet launched.
+Stripe has been removed entirely (F-03 / F-14 / F-17). The plan catalogue is
+still served so the frontend can render a "Coming soon" pricing page, but no
+money ever changes hands and every account has full access. Any endpoint that
+would previously have charged or upgraded a paying customer now returns a
+'coming_soon' response instead of performing a billing mutation.
 """
 import logging
 logger = logging.getLogger(__name__)
@@ -20,10 +27,26 @@ billing_bp = Blueprint('billing', __name__, url_prefix='/api/billing')
 
 init_subscription_db()
 
+# Single source of truth for the "payments not live yet" state.
+PAYMENTS_AVAILABLE = False
+COMING_SOON_MESSAGE = (
+    "Paid plans are coming soon. Your account currently has full access at no "
+    "charge — there is nothing to purchase yet."
+)
+
+
+def _coming_soon():
+    """Standard response for any endpoint that would have taken a payment."""
+    return APIResponse.success({
+        "status": "coming_soon",
+        "available": False,
+        "message": COMING_SOON_MESSAGE,
+    })
+
 
 @billing_bp.route('/plans', methods=['GET'])
 def get_plans():
-    """Get available subscription plans"""
+    """Get available subscription plans (marked coming soon)."""
     try:
         plans = []
         for tier, details in SUBSCRIPTION_TIERS.items():
@@ -36,10 +59,18 @@ def get_plans():
                 "api_calls_limit": details["api_calls_per_day"],
                 "brokers_supported": details["brokers_supported"],
                 "features": details["features"],
-                "priority_support": details["priority_support"]
+                "priority_support": details["priority_support"],
+                # The UI uses these flags to render a disabled "Coming soon" CTA.
+                "available": False,
+                "status": "coming_soon",
             })
 
-        return APIResponse.success({"plans": plans, "count": len(plans)})
+        return APIResponse.success({
+            "plans": plans,
+            "count": len(plans),
+            "payments_available": PAYMENTS_AVAILABLE,
+            "message": COMING_SOON_MESSAGE,
+        })
 
     except Exception as e:
         return APIResponse.server_error(str(e), e)
@@ -48,7 +79,7 @@ def get_plans():
 @billing_bp.route('/subscription', methods=['GET'])
 @MultiTenantMiddleware.tenant_required
 def get_subscription():
-    """Get current user subscription"""
+    """Get current user subscription (read-only, always available)."""
     try:
         user_id = g.user_id
         db = SessionLocal()
@@ -72,81 +103,29 @@ def get_subscription():
 @billing_bp.route('/upgrade', methods=['POST'])
 @MultiTenantMiddleware.tenant_required
 def upgrade_plan():
-    """Upgrade subscription plan"""
-    try:
-        user_id = g.user_id
-        data = request.get_json()
-
-        if not data or "plan_tier" not in data:
-            return APIResponse.bad_request("Plan tier required")
-
-        plan_tier = data.get("plan_tier").lower()
-
-        if plan_tier not in SUBSCRIPTION_TIERS:
-            return APIResponse.bad_request(f"Invalid plan tier. Available: {list(SUBSCRIPTION_TIERS.keys())}")
-
-        db = SessionLocal()
-        user = get_user_by_id(db, user_id)
-
-        if not user:
-            db.close()
-            return APIResponse.not_found("User not found")
-
-        subscription = upgrade_subscription(db, user_id, plan_tier)
-        db.close()
-
-        return APIResponse.success(subscription.to_dict())
-
-    except Exception as e:
-        return APIResponse.server_error(str(e), e)
+    """Upgrade subscription plan — disabled while payments are coming soon."""
+    return _coming_soon()
 
 
 @billing_bp.route('/downgrade', methods=['POST'])
 @MultiTenantMiddleware.tenant_required
 def downgrade_plan():
-    """Downgrade subscription plan"""
-    try:
-        user_id = g.user_id
-        data = request.get_json()
-
-        if not data or "plan_tier" not in data:
-            return APIResponse.bad_request("Plan tier required")
-
-        plan_tier = data.get("plan_tier").lower()
-
-        db = SessionLocal()
-        subscription = upgrade_subscription(db, user_id, plan_tier)
-        db.close()
-
-        return APIResponse.success(subscription.to_dict())
-
-    except Exception as e:
-        return APIResponse.server_error(str(e), e)
+    """Downgrade subscription plan — disabled while payments are coming soon."""
+    return _coming_soon()
 
 
 @billing_bp.route('/cancel', methods=['POST'])
 @MultiTenantMiddleware.tenant_required
 def cancel_subscription():
-    """Cancel subscription"""
-    try:
-        user_id = g.user_id
-        db = SessionLocal()
+    """Cancel subscription — nothing to cancel while payments are coming soon."""
+    return _coming_soon()
 
-        subscription = get_user_subscription(db, user_id)
-        if not subscription:
-            db.close()
-            return APIResponse.not_found("No subscription found")
 
-        subscription.status = "canceled"
-        subscription.canceled_at = datetime.utcnow()
-        subscription.auto_renew = False
-        db.commit()
-        db.close()
-
-        return APIResponse.success({"message": "Subscription canceled"})
-
-    except Exception as e:
-        return APIResponse.server_error(str(e), e)
+@billing_bp.route('/create-payment-intent', methods=['POST'])
+@MultiTenantMiddleware.tenant_required
+def create_payment_intent():
+    """Payment processing is not available yet (Stripe removed)."""
+    return _coming_soon()
 
 
 @billing_bp.route('/usage', methods=['GET'])
@@ -206,42 +185,5 @@ def list_invoices():
         return APIResponse.server_error(str(e), e)
 
 
-@billing_bp.route('/create-payment-intent', methods=['POST'])
-@MultiTenantMiddleware.tenant_required
-def create_payment_intent():
-    """Create Stripe payment intent"""
-    try:
-        user_id = g.user_id
-        data = request.get_json()
-
-        if not data or "amount" not in data:
-            return APIResponse.bad_request("Amount required")
-
-        amount = data.get("amount", 0)
-        if amount <= 0:
-            return APIResponse.bad_request("Invalid amount")
-
-        try:
-            import stripe
-            stripe.api_key = os.getenv("STRIPE_API_KEY")
-
-            intent = stripe.PaymentIntent.create(
-                amount=int(amount * 100),
-                currency="inr",
-                metadata={"user_id": user_id}
-            )
-
-            return APIResponse.success({
-                "client_secret": intent.client_secret,
-                "payment_intent_id": intent.id
-            })
-
-        except Exception as e:
-            return APIResponse.server_error(f"Payment processing error: {str(e)}", e)
-
-    except Exception as e:
-        return APIResponse.server_error(str(e), e)
-
-
 if __name__ == "__main__":
-    logger.info("✅ Billing routes module ready")
+    logger.info("✅ Billing routes module ready (payments coming soon)")

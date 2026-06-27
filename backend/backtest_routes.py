@@ -61,13 +61,17 @@ def run_backtest():
                 "message": f"Unknown strategy: {strategy_id}"
             }), 400
 
-        # Run backtest
+        # F-20: inject the live, authenticated broker connection. If the broker
+        # is not connected, Backtest.run() returns an explicit error rather than
+        # fabricating data.
+        from tradosphere_saas_server_v3_1 import get_market
         result = Backtest.run(
             symbol=symbol,
             strategy=strategy,
             interval=interval,
             days_back=days_back,
-            initial_capital=initial_capital
+            initial_capital=initial_capital,
+            market_data=get_market()
         )
 
         if result.get("status") == "success":
@@ -92,12 +96,14 @@ def compare_strategies():
         days_back = int(data.get('days_back', 30))
         initial_capital = float(data.get('initial_capital', 100000))
 
-        # Run comparison
+        # Run comparison (F-20: inject live broker connection)
+        from tradosphere_saas_server_v3_1 import get_market
         result = Backtest.compare_strategies(
             symbol=symbol,
             interval=interval,
             days_back=days_back,
-            initial_capital=initial_capital
+            initial_capital=initial_capital,
+            market_data=get_market()
         )
 
         return jsonify({

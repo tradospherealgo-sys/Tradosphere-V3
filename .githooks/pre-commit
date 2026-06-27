@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+#
+# F-10: block committing any .env file. Real secrets (Angel One creds, JWT
+# secret, Google OAuth secret, etc.) must never enter git history. The only
+# allowed env file is .env.example (a template containing no real secrets).
+#
+# This hook is version-controlled. Activate it for your clone with:
+#     git config core.hooksPath .githooks
+#
+set -euo pipefail
+
+# Staged files being added/copied/modified/renamed
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+
+blocked=""
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  base=$(basename "$f")
+  case "$base" in
+    .env.example) continue ;;          # template is allowed
+    .env|.env.*)  blocked="$blocked $f" ;;
+  esac
+done <<< "$staged"
+
+if [ -n "$blocked" ]; then
+  echo "" >&2
+  echo "✖ COMMIT BLOCKED (F-10): refusing to commit .env file(s):" >&2
+  for f in $blocked; do echo "    - $f" >&2; done
+  echo "" >&2
+  echo "  These files contain secrets and must never be committed." >&2
+  echo "  They are .gitignored already; if one got staged, unstage it:" >&2
+  echo "      git rm --cached <file>" >&2
+  echo "" >&2
+  echo "  To override in a genuine emergency (NOT recommended):" >&2
+  echo "      git commit --no-verify" >&2
+  echo "" >&2
+  exit 1
+fi
+
+exit 0

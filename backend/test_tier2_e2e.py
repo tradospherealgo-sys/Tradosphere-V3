@@ -416,8 +416,14 @@ try:
     check("#4 404s collapse into <unmatched> bucket",
           any("<unmatched>" in k for k in _eps), f"eps sample={_eps[:5]}")
 
-    # FIX #5: CORS preflight only reflects allow-listed origins
-    check("#5 allow-list accepts *.vercel.app", _is_origin_allowed("https://x.vercel.app") is True)
+    # FIX #5 / F-09: CORS preflight only reflects allow-listed origins.
+    # The "https://*.vercel.app" wildcard was REMOVED (F-09): only the exact
+    # production Vercel URL is allowed; arbitrary *.vercel.app subdomains
+    # (attacker-controlled deployments) must now be rejected.
+    check("F-09 allow-list accepts exact prod vercel URL",
+          _is_origin_allowed("https://tradosphere.vercel.app") is True)
+    check("F-09 allow-list REJECTS arbitrary *.vercel.app subdomain",
+          _is_origin_allowed("https://x.vercel.app") is False)
     check("#5 allow-list rejects arbitrary origin", _is_origin_allowed("https://evil.com") is False)
     r_evil = c6.open("/api/health", method="OPTIONS", headers={"Origin": "https://evil.com"})
     check("#5 preflight gives evil origin NO ACAO header",
