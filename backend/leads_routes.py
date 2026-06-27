@@ -13,14 +13,21 @@ from leads_model import (
     get_all_leads, get_all_clients, get_leads_stats, get_clients_stats
 )
 from multi_tenant_middleware import MultiTenantMiddleware
-from auth_manager import AuthDecorator
+from auth_manager_v3_1 import AuthDecorator
 
 leads_bp = Blueprint('leads', __name__, url_prefix='/api/leads')
 
 
 @leads_bp.route('/stats', methods=['GET'])
+@AuthDecorator.admin_required
 def get_stats():
-    """Get leads and clients statistics (public)"""
+    """Get leads and clients statistics.
+
+    SECURITY: this exposes aggregate business financials (lead counts,
+    conversion rate, total MRR/LTV). It was previously PUBLIC, leaking those
+    metrics to anyone. It now requires an admin token. Internal error detail
+    is logged server-side and never returned to the client.
+    """
     try:
         db = SessionLocal()
         leads_stats = get_leads_stats(db)
@@ -36,9 +43,10 @@ def get_stats():
         }), 200
 
     except Exception as e:
+        logger.error(f"leads/stats error: {e}", exc_info=True)
         return jsonify({
             "status": "error",
-            "message": str(e)
+            "message": "Unable to load stats right now."
         }), 500
 
 
