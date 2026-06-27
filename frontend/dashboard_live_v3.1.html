@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tradosphere - Angel One Style Dashboard</title>
     <!-- Configuration: Backend API URL -->
-    <script src="config.js" defer></script>
+    <script src="config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <style>
@@ -1055,7 +1055,7 @@
 
     <script>
         // Use centralized API configuration from config.js
-        const API = (typeof API_BASE_URL !== 'undefined') ? API_BASE_URL : 'http://localhost:5001';
+        const API = window.API_BASE_URL || 'http://localhost:5001';
         const TOKEN = localStorage.getItem('access_token');
         let selectedIndex = 'NIFTY';
         let mainChart = null;
@@ -1087,7 +1087,7 @@
 
         async function loadDisclaimer() {
             try {
-                const base = (typeof API_BASE_URL !== 'undefined') ? API_BASE_URL : (window.API_BASE_URL || 'http://localhost:5001');
+                const base = window.API_BASE_URL || 'http://localhost:5001';
                 const res = await fetch(`${base}/api/disclaimer`);
                 if (!res.ok) return;
                 const data = await res.json();
@@ -2187,7 +2187,8 @@
             // Expose for debugging / optional manual use.
             window.tradosphereSocket = socket;
         }
-        // Wait for config.js (deferred) to populate API_BASE_URL.
+        // config.js runs before this script and sets API_BASE_URL; the
+        // load-event fallback stays as a defensive guard.
         if (window.API_BASE_URL) connect();
         else window.addEventListener('load', connect);
     })();

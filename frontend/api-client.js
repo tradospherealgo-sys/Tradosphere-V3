@@ -105,7 +105,7 @@ class APIClient {
   /**
    * Automatically handle response and show errors
    */
-  async request WithErrorHandling(endpoint, options = {}, errorDisplay = true) {
+  async requestWithErrorHandling(endpoint, options = {}, errorDisplay = true) {
     const response = await this.request(endpoint, options);
 
     if (response.error) {
